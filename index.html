@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>日本語テキスト多角分析・可視化ツール</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <!-- kuromoji.js (Japanese morphological analyzer) -->
+    <script src="lib/kuromoji/kuromoji.js"></script>
+    <!-- wordcloud2.js (Word Cloud renderer) -->
+    <script src="lib/wordcloud2/wordcloud2.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar / Settings Control -->
+        <aside class="sidebar">
+            <div class="logo">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                <span>テキスト多角分析ツール</span>
+            </div>
+
+            <div class="control-group">
+                <h3>1. データ入力</h3>
+                <div class="input-tabs">
+                    <button class="input-tab-btn active" id="tab-btn-file">ファイル選択</button>
+                    <button class="input-tab-btn" id="tab-btn-text">直接貼り付け</button>
+                </div>
+                
+                <!-- File Upload Panel -->
+                <div id="input-panel-file" class="input-panel active-panel">
+                    <div class="upload-zone" id="drop-zone">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                        <p>テキストファイルをドロップするか</p>
+                        <button class="btn btn-secondary" onclick="document.getElementById('file-input').click()">ファイルを選択</button>
+                        <input type="file" id="file-input" style="display: none;" accept=".txt">
+                    </div>
+                </div>
+
+                <!-- Text Copy-Paste Panel -->
+                <div id="input-panel-text" class="input-panel">
+                    <textarea id="raw-text-input" placeholder="分析したい文章をここに直接貼り付けてください..." style="height: 110px; width: 100%; box-sizing: border-box;"></textarea>
+                    <button class="btn btn-primary btn-sm" id="analyze-raw-text-btn" style="width: 100%; margin-top: 8px;">分析を実行する</button>
+                </div>
+
+                <div class="file-info" id="file-info">データが読み込まれていません</div>
+                <button class="btn btn-outline-w btn-xs" id="load-sample-btn" style="margin-top: 8px; width: 100%; font-size: 11px;">デモデータを読み込む</button>
+            </div>
+
+            <div class="control-group">
+                <h3>2. 解析フィルター設定</h3>
+                <label>対象品詞:</label>
+                <div class="checkbox-group">
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="pos-noun" checked> 名詞
+                    </label>
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="pos-verb"> 動詞
+                    </label>
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="pos-adj"> 形容詞
+                    </label>
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="pos-adv"> 副詞
+                    </label>
+                </div>
+
+                <div class="select-wrapper">
+                    <label for="ranking-method">重要度判定の基準:</label>
+                    <select id="ranking-method" class="select-control">
+                        <option value="frequency" selected>頻出度 (出現回数順)</option>
+                        <option value="tfidf">特徴度 (TF-IDF順)</option>
+                    </select>
+                </div>
+
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <span>最小出現回数 <small style="color: var(--text-muted); font-size: 10px;">(ノイズ除外)</small>:</span>
+                        <span id="min-count-val">1</span>
+                    </div>
+                    <input type="range" id="min-count-range" min="1" max="10" value="1" class="slider">
+                </div>
+
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <span>最大表示単語数 <small style="color: var(--text-muted); font-size: 10px;">(見やすさ調整)</small>:</span>
+                        <span id="max-words-val">50</span>
+                    </div>
+                    <input type="range" id="max-words-range" min="10" max="100" value="50" class="slider">
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>3. デザイン設定</h3>
+                
+                <label for="display-type">表示形式:</label>
+                <select id="display-type" class="select-control">
+                    <option value="cloud">ワードクラウド</option>
+                    <option value="chart">横棒グラフ (上位語リスト)</option>
+                    <option value="network">共起ネットワーク</option>
+                    <option value="pca">多変量解析 (PCA散布図)</option>
+                </select>
+
+                <div id="method-description" class="method-description" style="margin-top: 8px; margin-bottom: 8px;">
+                    <!-- Dynamically populated via JS -->
+                </div>
+
+                <div id="cluster-count-group" style="display: none; margin-top: 10px; margin-bottom: 10px;">
+                    <label for="cluster-count">クラスター数 (K平均法):</label>
+                    <input type="number" id="cluster-count" min="2" max="8" value="3" class="select-control" style="width: 100%; box-sizing: border-box;">
+                </div>
+
+                <label for="color-theme">カラーテーマ:</label>
+                <select id="color-theme" class="select-control">
+                    <!-- Light Background Themes -->
+                    <option value="aurora-light">オーロラ (白地・カラフル)</option>
+                    <option value="cool-light">クール (白地・ブルー系)</option>
+                    <option value="warm-light">ウォーム (白地・暖色系)</option>
+                    <option value="pastel-light">パステル (白地・淡色)</option>
+                    <option value="pure-bw">白黒 (白地・純黒のみ)</option>
+                    <!-- Dark Background Themes -->
+                    <option value="aurora-dark">ミッドナイト (黒地・カラフル)</option>
+                    <option value="monochrome-dark">モノクローム (黒地・グレー階調)</option>
+                </select>
+
+                <label for="font-select">フォント:</label>
+                <select id="font-select" class="select-control">
+                    <option value="'BIZ UDP Gothic', sans-serif">BIZ UDPゴシック</option>
+                    <option value="'BIZ UDP Mincho', serif">BIZ UDP明朝</option>
+                    <option value="'Noto Sans JP', sans-serif">Noto Sans JP</option>
+                    <option value="'Inter', sans-serif">Inter</option>
+                    <option value="monospace">等幅（Monospace）</option>
+                </select>
+
+                <div class="checkbox-group column-layout">
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="shape-circle" checked> 円形に配置する
+                    </label>
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="rotate-text" checked> 文字を回転させる
+                    </label>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>4. 複合語（一つにまとめる単語）</h3>
+                <div class="stopword-input-container">
+                    <input type="text" id="new-compound-word" placeholder="一つにまとめる単語を入力" class="select-control inline-input">
+                    <button class="btn btn-secondary" id="add-compound-word-btn">追加</button>
+                </div>
+                <div class="stopword-tags" id="compound-words-list">
+                    <!-- Compound word tags will be dynamically populated here -->
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>5. 除外ワード（ストップワード）</h3>
+                <div class="stopword-input-container">
+                    <input type="text" id="new-stopword" placeholder="除外する単語を入力" class="select-control inline-input">
+                    <button class="btn btn-secondary" id="add-stopword-btn">追加</button>
+                </div>
+                <div class="stopword-tags" id="stopwords-list">
+                    <!-- Stopword tags will be dynamically populated here -->
+                </div>
+                <button class="btn btn-outline-w btn-xs" id="reset-stopwords-btn">初期状態に戻す</button>
+            </div>
+        </aside>
+
+        <!-- Main Visualizer Area -->
+        <main class="main-content">
+            <!-- Loading Overlay -->
+            <div class="loading-overlay" id="loading-overlay">
+                <div class="spinner"></div>
+                <p id="loading-text">日本語解析辞書を読み込んでいます（初回のみ数十秒かかる場合があります）...</p>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progress-bar"></div>
+                </div>
+            </div>
+
+            <!-- Header -->
+            <header class="main-header">
+                <h1>テキスト分析・可視化結果</h1>
+                <div class="header-actions" style="display: flex; align-items: center; gap: 8px;">
+                    <!-- Data export actions -->
+                    <button class="btn btn-secondary" id="export-words-csv-btn" style="height: 38px; padding: 0 12px; font-size: 13px;" disabled>
+                        CSV保存 (単語)
+                    </button>
+                    <button class="btn btn-secondary" id="export-pairs-csv-btn" style="height: 38px; padding: 0 12px; font-size: 13px;" disabled>
+                        CSV保存 (共起)
+                    </button>
+                    
+                    <span style="border-left: 1px solid var(--border-color); height: 24px; margin: 0 4px;"></span>
+
+                    <!-- Image download actions -->
+                    <select id="download-size" class="select-control" style="width: auto; height: 38px; padding: 0 12px; font-size: 13px; margin: 0; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
+                        <option value="small">小 (800 × 600)</option>
+                        <option value="medium" selected>中 (1200 × 900)</option>
+                        <option value="large">大 (1920 × 1080)</option>
+                    </select>
+                    <button class="btn btn-primary" id="download-btn" style="height: 38px;" disabled>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                        画像を保存 (PNG)
+                    </button>
+                </div>
+            </header>
+
+            <!-- Canvas Container -->
+            <div class="canvas-container" id="canvas-container">
+                <canvas id="cloud-canvas"></canvas>
+                <div id="chart-container" class="chart-container" style="display: none;"></div>
+                <div class="empty-state" id="empty-state">
+                    <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    <h2>データを読み込むと分析が始まります</h2>
+                    <p style="max-width: 380px; line-height: 1.7; color: var(--text-muted); font-size: 13px;">
+                        左パネルからテキストファイルをアップロードするか、<br>
+                        まずは <strong style="color: var(--text-secondary)">「デモデータを読み込む」</strong> を試してみましょう。
+                    </p>
+                    <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 8px; text-align: left; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 16px 20px; max-width: 380px;">
+                        <div style="font-size: 11px; font-weight: 700; color: var(--accent-blue); margin-bottom: 4px; letter-spacing: 0.05em;">💡 分析の流れ（おすすめの順番）</div>
+                        <div style="font-size: 11.5px; color: var(--text-secondary); display: flex; gap: 10px; align-items: flex-start;"><span style="color: var(--accent-blue); font-weight: 700; flex-shrink:0;">①</span><span><strong style="color:var(--text-primary)">ワードクラウド</strong>で全体のキーワードを把握する</span></div>
+                        <div style="font-size: 11.5px; color: var(--text-secondary); display: flex; gap: 10px; align-items: flex-start;"><span style="color: var(--accent-blue); font-weight: 700; flex-shrink:0;">②</span><span><strong style="color:var(--text-primary)">横棒グラフ</strong>で頻出語を数値で確認する</span></div>
+                        <div style="font-size: 11.5px; color: var(--text-secondary); display: flex; gap: 10px; align-items: flex-start;"><span style="color: var(--accent-blue); font-weight: 700; flex-shrink:0;">③</span><span><strong style="color:var(--text-primary)">共起ネットワーク</strong>で語の関係とテーマを発見する ⬅ ここが核心</span></div>
+                        <div style="font-size: 11.5px; color: var(--text-secondary); display: flex; gap: 10px; align-items: flex-start;"><span style="color: var(--accent-blue); font-weight: 700; flex-shrink:0;">④</span><span><strong style="color:var(--text-primary)">PCA散布図</strong>でテーマのまとまりを俯瞰する</span></div>
+                    </div>
+                </div>
+                <!-- Custom Tooltip for word frequencies -->
+                <div class="tooltip" id="tooltip"></div>
+            </div>
+
+            <!-- Simple stats bar -->
+            <footer class="stats-bar" id="stats-bar">
+                <div>総数: <span id="stat-lines">0</span> 件</div>
+                <div>総単語数: <span id="stat-total-words">0</span> 語</div>
+                <div>異なり単語数: <span id="stat-words">0</span> 語</div>
+                <div><span id="data-warning" style="display:none; font-weight:600; font-size:12px;"></span></div>
+            </footer>
+        </main>
+    </div>
+    
+    <!-- KWIC Modal -->
+    <div id="kwic-modal-overlay" class="kwic-overlay" style="display: none;">
+        <div class="kwic-modal">
+            <header class="kwic-header">
+                <div>
+                    <span style="font-size: 13px; color: var(--text-secondary);">対象単語: </span>
+                    <strong id="kwic-word-title" style="font-size: 16px; margin: 0 4px;"></strong>
+                    <span style="font-size: 13px; color: var(--text-secondary);">(出現回数: <span id="kwic-word-count"></span>回)</span>
+                    <span id="kwic-limit-warning" style="display: none; margin-left: 12px; font-size: 12px; color: #F59E0B; background: rgba(245, 158, 11, 0.1); padding: 2px 8px; border-radius: 4px;">※上位1000件を表示</span>
+                </div>
+                <button id="kwic-close-btn" class="kwic-close" aria-label="閉じる">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </header>
+            <div class="kwic-table-container">
+                <table class="kwic-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 60px; text-align: center; white-space: nowrap;">行</th>
+                            <th style="text-align: right;">前の文脈</th>
+                            <th style="width: 120px; text-align: center; white-space: nowrap;">対象語</th>
+                            <th style="text-align: left;">後の文脈</th>
+                        </tr>
+                    </thead>
+                    <tbody id="kwic-tbody">
+                        <!-- KWIC rows will be injected here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- CSV Column Selector Modal -->
+    <div id="csv-modal-overlay" class="kwic-overlay" style="display: none; z-index: 1100;">
+        <div class="kwic-modal" style="max-width: 520px; padding: 24px;">
+            <header class="kwic-header" style="margin-bottom: 16px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 18px;">📊</span>
+                    <strong style="font-size: 16px; color: var(--text-primary);">CSV列の選択</strong>
+                </div>
+                <button id="csv-modal-close-btn" class="kwic-close" aria-label="閉じる">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </header>
+            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">
+                読み込まれたCSVファイルには複数の列が含まれています。<br>分析対象（自由記述など）とする列を選択してください。
+            </p>
+            <div style="margin-bottom: 20px;">
+                <label for="csv-column-select" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--text-primary);">分析対象の列:</label>
+                <select id="csv-column-select" style="width: 100%; padding: 10px 12px; font-size: 13px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-surface); color: var(--text-primary); outline: none;">
+                </select>
+            </div>
+            <div style="background: var(--bg-body); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; margin-bottom: 24px;">
+                <div style="font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">データ表示例 (プレビュー):</div>
+                <div id="csv-column-preview" style="font-size: 12px; color: var(--text-primary); word-break: break-all; max-height: 80px; overflow-y: auto; line-height: 1.4;"></div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button id="csv-cancel-btn" style="padding: 8px 16px; font-size: 13px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-surface); color: var(--text-primary); cursor: pointer;">キャンセル</button>
+                <button id="csv-confirm-btn" style="padding: 8px 18px; font-size: 13px; border-radius: 6px; border: none; background: var(--accent-blue); color: #ffffff; font-weight: 600; cursor: pointer;">選択した列で分析を実行</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js?v=1.3"></script>
+</body>
+</html>
