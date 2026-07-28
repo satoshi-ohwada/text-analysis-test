@@ -870,48 +870,52 @@ textarea#raw-text-input:focus {
     left: 0;
     width: 100%;
     height: 100%;
-    background: var(--bg-body);
+    background: #FFFFFF; /* Forced white for image export */
+    color: #111827;
     z-index: 10;
+    overflow-y: auto;
+    padding-bottom: 40px;
 }
 
 .lda-header-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
+    background: #F9FAFB;
+    border: 1px solid #E5E7EB;
     border-radius: 10px;
     padding: 16px 20px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    box-shadow: var(--shadow-sm);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .lda-header-title {
     font-size: 15px;
     font-weight: 700;
-    color: var(--text-primary);
+    color: #111827;
 }
 
 .lda-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 20px;
+    padding: 0 2px;
 }
 
 .lda-topic-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
+    background: #FFFFFF;
+    border: 1px solid #E5E7EB;
     border-radius: 12px;
     padding: 18px;
     display: flex;
     flex-direction: column;
     gap: 12px;
-    box-shadow: var(--shadow-sm);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
     transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .lda-topic-card:hover {
     transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
 }
 
 .lda-topic-header {
@@ -919,7 +923,7 @@ textarea#raw-text-input:focus {
     align-items: center;
     justify-content: space-between;
     padding-bottom: 10px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid #F3F4F6;
 }
 
 .lda-topic-name {
@@ -928,7 +932,7 @@ textarea#raw-text-input:focus {
     display: flex;
     align-items: center;
     gap: 8px;
-    color: var(--text-primary);
+    color: #111827;
 }
 
 .lda-topic-badge {
@@ -950,19 +954,19 @@ textarea#raw-text-input:focus {
     justify-content: space-between;
     padding: 6px 10px;
     border-radius: 6px;
-    background: var(--bg-body);
+    background: #F9FAFB;
     font-size: 12.5px;
     cursor: pointer;
     transition: background 0.15s ease;
 }
 
 .lda-word-row:hover {
-    background: rgba(59, 130, 246, 0.08);
+    background: #EFF6FF;
 }
 
 .lda-word-name {
     font-weight: 600;
-    color: var(--text-primary);
+    color: #111827;
     display: flex;
     align-items: center;
     gap: 6px;

@@ -2041,21 +2041,25 @@ function renderLDATopicView() {
 
     let cardsHtml = topicsData.map(topic => {
         const sharePct = (topic.share * 100).toFixed(1);
-        const color = isDarkTheme ? topic.darkColor : topic.lightColor;
+        // Always use light color for the white-background report style
+        const color = topic.lightColor;
 
         const maxProbInTopic = topic.topWords.length > 0 ? topic.topWords[0].prob : 1;
 
         const wordsRows = topic.topWords.map((wItem, idx) => {
             const relBarWidth = Math.max(10, Math.min(100, Math.round((wItem.prob / maxProbInTopic) * 100)));
             const probPct = (wItem.prob * 100).toFixed(1);
+            const globalCount = wordFrequencies.find(item => item.text === wItem.word)?.count || 0;
 
             return `
                 <div class="lda-word-row" onclick="openWordTopicDetail('${wItem.word}')" title="クリックでこの単語のソフトクラスタリング割合（トピック分布）を表示">
                     <div class="lda-word-name">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); width: 16px;">${idx + 1}.</span>
+                        <span style="font-size: 11px; font-weight: 700; color: #9CA3AF; width: 16px;">${idx + 1}.</span>
                         <span>${wItem.word}</span>
+                        <span style="font-size: 10px; color: #6B7280; margin-left: 4px; font-weight: normal;">(全体 ${globalCount}回)</span>
                     </div>
-                    <div class="lda-word-bar-container">
+                    <div class="lda-word-bar-container" title="トピック内での単語の出現確率（重要度）">
+                        <span style="font-size: 10px; color: #6B7280; margin-right: 2px;">重要度</span>
                         <div class="lda-word-bar" style="background: ${color}; width: ${relBarWidth}%;"></div>
                         <div class="lda-word-pct">${probPct}%</div>
                     </div>
@@ -2075,7 +2079,7 @@ function renderLDATopicView() {
                     </div>
                 </div>
                 <div class="lda-word-list">
-                    ${wordsRows || '<div style="font-size:12px; color:var(--text-muted); padding:8px;">該当単語なし</div>'}
+                    ${wordsRows || '<div style="font-size:12px; color:#6B7280; padding:8px;">該当単語なし</div>'}
                 </div>
             </div>
         `;
