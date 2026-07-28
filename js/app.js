@@ -70,9 +70,11 @@ const addStopwordBtn = document.getElementById('add-stopword-btn');
 const stopwordsList = document.getElementById('stopwords-list');
 const resetStopwordsBtn = document.getElementById('reset-stopwords-btn');
 
-// Export CSV Buttons
+// Export & Relayout Action Buttons
 const exportWordsCsvBtn = document.getElementById('export-words-csv-btn');
 const exportPairsCsvBtn = document.getElementById('export-pairs-csv-btn');
+const relayoutBtn = document.getElementById('relayout-btn');
+let isForceRelayout = false;
 
 // Input switcher Elements
 const tabBtnFile = document.getElementById('tab-btn-file');
@@ -2118,6 +2120,7 @@ function updateWordCloud() {
         downloadBtn.disabled = true;
         exportWordsCsvBtn.disabled = true;
         exportPairsCsvBtn.disabled = true;
+        if (relayoutBtn) relayoutBtn.disabled = true;
         return;
     }
 
@@ -2125,6 +2128,7 @@ function updateWordCloud() {
     downloadBtn.disabled = false;
     exportWordsCsvBtn.disabled = false;
     exportPairsCsvBtn.disabled = false;
+    if (relayoutBtn) relayoutBtn.disabled = false;
 
     const minCount = parseInt(minCountRange.value);
     const maxWords = parseInt(maxWordsRange.value);
@@ -2149,6 +2153,7 @@ function updateWordCloud() {
         downloadBtn.disabled = true;
         exportWordsCsvBtn.disabled = true;
         exportPairsCsvBtn.disabled = true;
+        if (relayoutBtn) relayoutBtn.disabled = true;
         return;
     }
 
@@ -2241,21 +2246,33 @@ function updateWordCloud() {
 
         const selectedFont = fontSelect.value;
         
-        const prevNodeMap = new Map();
-        networkNodes.forEach(n => prevNodeMap.set(n.id, { x: n.x, y: n.y }));
-        
-        networkNodes.forEach(node => {
-            if (prevNodeMap.has(node.id)) {
-                const prev = prevNodeMap.get(node.id);
-                node.x = prev.x;
-                node.y = prev.y;
-            } else {
-                node.x = cloudCanvas.width / 2 + (Math.random() - 0.5) * 100;
-                node.y = cloudCanvas.height / 2 + (Math.random() - 0.5) * 100;
-            }
-            node.vx = 0;
-            node.vy = 0;
-        });
+        if (isForceRelayout) {
+            const cx = cloudCanvas.width / 2;
+            const cy = cloudCanvas.height / 2;
+            networkNodes.forEach(node => {
+                node.x = cx + (Math.random() - 0.5) * 300;
+                node.y = cy + (Math.random() - 0.5) * 300;
+                node.vx = 0;
+                node.vy = 0;
+            });
+            isForceRelayout = false;
+        } else {
+            const prevNodeMap = new Map();
+            networkNodes.forEach(n => prevNodeMap.set(n.id, { x: n.x, y: n.y }));
+            
+            networkNodes.forEach(node => {
+                if (prevNodeMap.has(node.id)) {
+                    const prev = prevNodeMap.get(node.id);
+                    node.x = prev.x;
+                    node.y = prev.y;
+                } else {
+                    node.x = cloudCanvas.width / 2 + (Math.random() - 0.5) * 100;
+                    node.y = cloudCanvas.height / 2 + (Math.random() - 0.5) * 100;
+                }
+                node.vx = 0;
+                node.vy = 0;
+            });
+        }
 
         const maxTicks = 220;
         let ticks = 0;
@@ -2498,6 +2515,18 @@ downloadBtn.addEventListener('click', () => {
         alert("画像の書き出しに失敗しました。\nエラー内容: " + error.message);
     }
 });
+
+if (relayoutBtn) {
+    relayoutBtn.addEventListener('click', () => {
+        if (wordFrequencies.length === 0) return;
+        isForceRelayout = true;
+        if (displayType.value === 'pca') {
+            if (rawTextData) processAndRender();
+        } else {
+            updateWordCloud();
+        }
+    });
+}
 
 // Run Initialization on Load
 window.addEventListener('DOMContentLoaded', () => {
