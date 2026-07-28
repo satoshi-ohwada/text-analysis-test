@@ -329,21 +329,30 @@ function loadTextAndTokenize(text) {
     let currentIndex = 0;
 
     function processChunk() {
-        const endIndex = Math.min(currentIndex + chunkSize, lines.length);
-        for (let i = currentIndex; i < endIndex; i++) {
-            globalAnalyzedLines.push(tokenizer.tokenize(lines[i]));
-        }
-        currentIndex = endIndex;
+        try {
+            const endIndex = Math.min(currentIndex + chunkSize, lines.length);
+            for (let i = currentIndex; i < endIndex; i++) {
+                const lineStr = String(lines[i] || '').trim();
+                if (lineStr.length > 0) {
+                    globalAnalyzedLines.push(tokenizer.tokenize(lineStr));
+                }
+            }
+            currentIndex = endIndex;
 
-        const pct = Math.round((currentIndex / lines.length) * 100);
-        if (loadingText) loadingText.innerText = `テキストを形態素解析中... (${currentIndex} / ${lines.length} 行)`;
-        if (progressBar) progressBar.style.width = `${pct}%`;
+            const pct = Math.round((currentIndex / lines.length) * 100);
+            if (loadingText) loadingText.innerText = `テキストを形態素解析中... (${currentIndex} / ${lines.length} 行)`;
+            if (progressBar) progressBar.style.width = `${pct}%`;
 
-        if (currentIndex < lines.length) {
-            setTimeout(processChunk, 0);
-        } else {
+            if (currentIndex < lines.length) {
+                setTimeout(processChunk, 0);
+            } else {
+                if (loadingOverlay) loadingOverlay.style.display = 'none';
+                processAndRender();
+            }
+        } catch (err) {
+            console.error("Tokenization error:", err);
             if (loadingOverlay) loadingOverlay.style.display = 'none';
-            processAndRender();
+            alert("形態素解析中にエラーが発生しました:\n" + err.message);
         }
     }
 
@@ -2718,6 +2727,7 @@ function updateWordCloud() {
     if (currentDisplayType === 'cloud') {
         cloudCanvas.style.display = 'block';
         chartContainer.style.display = 'none';
+        if (ldaContainer) ldaContainer.style.display = 'none';
         
         const getValue = item => rankingMethod === 'tfidf' ? item.tfidf : item.count;
         const maxVal = getValue(filteredList[0]);
@@ -2798,6 +2808,7 @@ function updateWordCloud() {
     } else if (currentDisplayType === 'chart') {
         cloudCanvas.style.display = 'block';
         chartContainer.style.display = 'none';
+        if (ldaContainer) ldaContainer.style.display = 'none';
         
         const chartList = filteredList.slice(0, 20);
         const selectedFont = fontSelect.value;
@@ -2806,6 +2817,7 @@ function updateWordCloud() {
     } else if (currentDisplayType === 'network') {
         cloudCanvas.style.display = 'block';
         chartContainer.style.display = 'none';
+        if (ldaContainer) ldaContainer.style.display = 'none';
 
         const selectedFont = fontSelect.value;
         
@@ -2914,9 +2926,15 @@ function updateWordCloud() {
     } else if (currentDisplayType === 'pca') {
         cloudCanvas.style.display = 'block';
         chartContainer.style.display = 'none';
+        if (ldaContainer) ldaContainer.style.display = 'none';
         
         const selectedFont = fontSelect.value;
         drawPCAOnCanvas(cloudCanvas, pcaPoints, selectedTheme, selectedFont, isDarkTheme);
+    } else if (currentDisplayType === 'topic-lda') {
+        cloudCanvas.style.display = 'none';
+        chartContainer.style.display = 'none';
+        if (ldaContainer) ldaContainer.style.display = 'block';
+        renderLDATopicView();
     }
 }
 
