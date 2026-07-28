@@ -307,7 +307,6 @@ analyzeRawTextBtn.addEventListener('click', () => {
 
 // Load Text, Tokenize (cached), and Trigger Render
 function loadTextAndTokenize(text) {
-    // Guard: if tokenizer is not yet ready, warn and abort
     if (!tokenizer) {
         alert("辞書の読み込みが完了していません。しばらくお待ちください。");
         return;
@@ -315,11 +314,40 @@ function loadTextAndTokenize(text) {
     rawTextData = text;
     const lines = rawTextData.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     opinionLinesCount = lines.length;
-    
-    // Process heavy tokenization only ONCE when loading raw text
-    globalAnalyzedLines = lines.map(line => tokenizer.tokenize(line));
-    
-    processAndRender();
+
+    if (lines.length === 0) {
+        alert("有効なテキストデータが見つかりませんでした。");
+        return;
+    }
+
+    if (loadingOverlay) loadingOverlay.style.display = 'flex';
+    if (loadingText) loadingText.innerText = `テキストを形態素解析中... (0 / ${lines.length} 行)`;
+    if (progressBar) progressBar.style.width = '0%';
+
+    globalAnalyzedLines = [];
+    const chunkSize = 200;
+    let currentIndex = 0;
+
+    function processChunk() {
+        const endIndex = Math.min(currentIndex + chunkSize, lines.length);
+        for (let i = currentIndex; i < endIndex; i++) {
+            globalAnalyzedLines.push(tokenizer.tokenize(lines[i]));
+        }
+        currentIndex = endIndex;
+
+        const pct = Math.round((currentIndex / lines.length) * 100);
+        if (loadingText) loadingText.innerText = `テキストを形態素解析中... (${currentIndex} / ${lines.length} 行)`;
+        if (progressBar) progressBar.style.width = `${pct}%`;
+
+        if (currentIndex < lines.length) {
+            setTimeout(processChunk, 0);
+        } else {
+            if (loadingOverlay) loadingOverlay.style.display = 'none';
+            processAndRender();
+        }
+    }
+
+    setTimeout(processChunk, 20);
 }
 
 // Event Listeners for UI
@@ -382,6 +410,17 @@ fileInput.addEventListener('change', (e) => {
 // --- CSV PARSING & COLUMN SELECTION ---
 let pendingCsvRows = [];
 
+function cleanCSVField(str) {
+    if (!str) return '';
+    let s = str.trim();
+    if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
+        s = s.substring(1, s.length - 1).trim();
+    }
+    // Replace escaped double quotes "" with "
+    s = s.replace(/""/g, '"');
+    return s;
+}
+
 function parseCSVText(text) {
     if (!text) return [];
     // Remove UTF-8 BOM if present
@@ -393,7 +432,7 @@ function parseCSVText(text) {
     let inQuotes = false;
     
     // Robust delimiter detection
-    const sampleText = text.substring(0, Math.min(2000, text.length));
+    const sampleText = text.substring(0, Math.min(3000, text.length));
     const commaCount = (sampleText.match(/,/g) || []).length;
     const tabCount = (sampleText.match(/\t/g) || []).length;
     const semiCount = (sampleText.match(/;/g) || []).length;
@@ -424,12 +463,12 @@ function parseCSVText(text) {
             if (char === '"') {
                 inQuotes = true;
             } else if (char === delimiter) {
-                curLine.push(curVal.trim());
+                curLine.push(cleanCSVField(curVal));
                 curVal = '';
             } else if (char === '\r') {
                 // ignore \r
             } else if (char === '\n') {
-                curLine.push(curVal.trim());
+                curLine.push(cleanCSVField(curVal));
                 if (curLine.some(cell => cell.length > 0)) {
                     lines.push(curLine);
                 }
@@ -441,7 +480,7 @@ function parseCSVText(text) {
         }
     }
     if (curVal.length > 0 || curLine.length > 0) {
-        curLine.push(curVal.trim());
+        curLine.push(cleanCSVField(curVal));
         if (curLine.some(cell => cell.length > 0)) {
             lines.push(curLine);
         }
