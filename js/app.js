@@ -2788,8 +2788,11 @@ function updateWordCloud() {
                 // Append info to method description
                 if (methodDescription) {
                     let existingHtml = methodDescription.innerHTML;
-                    if (!existingHtml.includes("シルエット法")) {
+                    if (!existingHtml.includes("自動クラスタリング適用中")) {
                         methodDescription.innerHTML = existingHtml + `<div style="margin-top: 8px; padding: 6px 10px; background: rgba(59, 130, 246, 0.1); border-left: 3px solid var(--accent-blue); border-radius: 4px; font-size: 11px;"><strong>🤖 自動クラスタリング適用中</strong>: 単語間の共起距離を計算し、階層的クラスタリング(Ward法)を実施。<br>シルエット分析による最適なクラスター数は <strong>${clusterResult.k}個</strong> と判定され、色分けに反映しました。</div>`;
+                    } else {
+                        // Update the K count without appending a new box
+                        methodDescription.innerHTML = existingHtml.replace(/<strong>\d+個<\/strong>/, `<strong>${clusterResult.k}個</strong>`);
                     }
                 }
 
@@ -2813,7 +2816,7 @@ function updateWordCloud() {
             }
         } else {
             // Restore description if switching back to random
-            if (methodDescription && methodDescription.innerHTML.includes("シルエット法")) {
+            if (methodDescription && methodDescription.innerHTML.includes("自動クラスタリング適用中")) {
                 updateClusterCountGroupVisibility();
             }
         }
