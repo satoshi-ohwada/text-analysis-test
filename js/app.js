@@ -3097,30 +3097,46 @@ downloadBtn.addEventListener('click', () => {
             link.href = image;
             link.click();
         } else if (currentMode === 'topic-lda') {
-            if (!ldaContainer || typeof html2canvas === 'undefined') return;
+            if (!ldaContainer) return;
             
             const originalText = downloadBtn.innerHTML;
             downloadBtn.disabled = true;
             downloadBtn.innerText = "書き出し中...";
-            
-            html2canvas(ldaContainer, {
-                backgroundColor: "#FFFFFF",
-                scale: 2
-            }).then(canvas => {
-                const image = canvas.toDataURL("image/png");
-                const link = document.createElement('a');
-                link.download = 'topic_lda.png';
-                link.href = image;
-                link.click();
-                
-                downloadBtn.disabled = false;
-                downloadBtn.innerHTML = originalText;
-            }).catch(error => {
-                console.error("html2canvas error:", error);
-                downloadBtn.disabled = false;
-                downloadBtn.innerHTML = originalText;
-                alert("画像の書き出しに失敗しました。\nエラー内容: " + error.message);
-            });
+
+            const exportLDA = () => {
+                html2canvas(ldaContainer, {
+                    backgroundColor: "#FFFFFF",
+                    scale: 2
+                }).then(canvas => {
+                    const image = canvas.toDataURL("image/png");
+                    const link = document.createElement('a');
+                    link.download = 'topic_lda.png';
+                    link.href = image;
+                    link.click();
+                    
+                    downloadBtn.disabled = false;
+                    downloadBtn.innerHTML = originalText;
+                }).catch(error => {
+                    console.error("html2canvas error:", error);
+                    downloadBtn.disabled = false;
+                    downloadBtn.innerHTML = originalText;
+                    alert("画像の書き出しに失敗しました。\nエラー内容: " + error.message);
+                });
+            };
+
+            if (typeof html2canvas === 'undefined') {
+                const script = document.createElement('script');
+                script.src = "lib/html2canvas/html2canvas.min.js";
+                script.onload = exportLDA;
+                script.onerror = () => {
+                    downloadBtn.disabled = false;
+                    downloadBtn.innerHTML = originalText;
+                    alert("画像化ライブラリが見つかりません。\\nlib/html2canvas/html2canvas.min.js が存在するか確認してください。");
+                };
+                document.head.appendChild(script);
+            } else {
+                exportLDA();
+            }
         }
     } catch (error) {
         console.error("PNG export failed:", error);
