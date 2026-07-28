@@ -38,7 +38,7 @@
                         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
                         <p>テキストファイルをドロップするか</p>
                         <button class="btn btn-secondary" onclick="document.getElementById('file-input').click()">ファイルを選択</button>
-                        <input type="file" id="file-input" style="display: none;" accept=".txt">
+                        <input type="file" id="file-input" style="display: none;" accept=".txt,.csv,.tsv">
                     </div>
                 </div>
 
@@ -137,7 +137,7 @@
                 </select>
 
                 <div id="cloud-color-mode-group" style="margin-top: 10px; margin-bottom: 10px;">
-                    <label for="cloud-color-mode">ワードクラウド配色 (HCA法):</label>
+                    <label for="cloud-color-mode">ワードクラウド配色 (階層クラスタリング):</label>
                     <select id="cloud-color-mode" class="select-control">
                         <option value="random">ランダム (テーマ準拠)</option>
                         <option value="cluster">自動クラスタリング (意味・共起で色分け)</option>
@@ -336,6 +336,6 @@
         </div>
     </div>
 
-    <script src="js/app.js?v=3.5"></script>
+    <script src="js/app.js?v=4.0"></script>
 </body>
 </html>

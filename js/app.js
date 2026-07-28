@@ -7,6 +7,7 @@ let globalAnalyzedLines = []; // Cached token lists per line: [[token, token...]
 let currentAnalysisCounts = {}; // Cached counts mapping for CSV export
 let currentAnalysisCoocCounts = {}; // Cached cooc counts mapping for CSV export
 let currentAnalysisDocFreq = {};    // Cached document-frequency for correct Jaccard in CSV export
+let currentTokenizeTaskId = 0;
 
 // Set for standard stop words (dynamically loaded from stopwords.txt)
 let defaultStopWordsSet = new Set();
@@ -263,7 +264,7 @@ function addCompoundWord(word) {
     word = word.trim();
     if (!word) return;
     
-    const words = word.split(/[,\s，、]+/).map(w => w.trim()).filter(w => w.length > 0);
+    const words = word.split(/[,\n，、]+/).map(w => w.trim()).filter(w => w.length > 0);
     
     let added = false;
     words.forEach(w => {
@@ -308,6 +309,7 @@ analyzeRawTextBtn.addEventListener('click', () => {
 
 // Load Text, Tokenize (cached), and Trigger Render
 function loadTextAndTokenize(text) {
+    const taskId = ++currentTokenizeTaskId;
     if (!tokenizer) {
         alert("辞書の読み込みが完了していません。しばらくお待ちください。");
         return;
@@ -331,6 +333,7 @@ function loadTextAndTokenize(text) {
 
     function processChunk() {
         try {
+            if (taskId !== currentTokenizeTaskId) return;
             const endIndex = Math.min(currentIndex + chunkSize, lines.length);
             for (let i = currentIndex; i < endIndex; i++) {
                 const lineStr = String(lines[i] || '').trim();
@@ -649,6 +652,7 @@ function initCSVModalListeners() {
         };
     }
 }
+initCSVModalListeners();
 
 function handleFile(file) {
     fileInfo.innerText = `${file.name} (${Math.round(file.size / 1024)} KB)`;
@@ -928,12 +932,13 @@ cloudCanvas.addEventListener('mousemove', (e) => {
             cloudCanvas.style.cursor = 'default';
         }
     } else if (currentMode === 'network') {
+        const scaleFactor = cloudCanvas.width / 1024;
         let hoveredNode = null;
         for (let i = networkNodes.length - 1; i >= 0; i--) { let node = networkNodes[i];
             const dx = mouseX - node.x;
             const dy = mouseY - node.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist <= node.radius) {
+            if (dist <= node.radius * scaleFactor) {
                 hoveredNode = node;
                 break;
             }
@@ -1091,9 +1096,9 @@ cloudCanvas.addEventListener('click', (e) => {
         const getCanvasX = (x) => pad + ((x - minX) / (maxX - minX)) * (cloudCanvas.width - 2 * pad);
         const getCanvasY = (y) => pad + ((maxY - y) / (maxY - minY)) * (cloudCanvas.height - 2 * pad);
 
-        const dblPcaCounts = pcaPoints.map(p => p.count);
-        const dblPcaMinCount = Math.min(...dblPcaCounts);
-        const dblPcaMaxCount = Math.max(...dblPcaCounts);
+        const pcaClickCounts = pcaPoints.map(p => p.count);
+        const pcaClickMinCount = Math.min(...pcaClickCounts);
+        const pcaClickMaxCount = Math.max(...pcaClickCounts);
 
         for (let i = pcaPoints.length - 1; i >= 0; i--) { let pt = pcaPoints[i];
             const px = getCanvasX(pt.x);
@@ -1102,8 +1107,8 @@ cloudCanvas.addEventListener('click', (e) => {
             const dy = mouseY - py;
             
             let radius = 10;
-            if (dblPcaMaxCount !== dblPcaMinCount) {
-                radius = 5 + ((pt.count - dblPcaMinCount) / (dblPcaMaxCount - dblPcaMinCount)) * 14;
+            if (pcaClickMaxCount !== pcaClickMinCount) {
+                radius = 5 + ((pt.count - pcaClickMinCount) / (pcaClickMaxCount - pcaClickMinCount)) * 14;
             }
             
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1364,7 +1369,8 @@ exportPairsCsvBtn.addEventListener('click', () => {
         // Use document frequency (not raw count) for correct Jaccard denominator
         const cA = currentAnalysisDocFreq[w1] || 1;
         const cB = currentAnalysisDocFreq[w2] || 1;
-        const jaccard = fAB / (cA + cB - fAB);
+        const denom = cA + cB - fAB;
+        const jaccard = denom > 0 ? fAB / denom : 0;
         if (jaccard > 0.01) {
             pairs.push({ w1, w2, fAB, jaccard });
         }
@@ -1382,6 +1388,7 @@ exportPairsCsvBtn.addEventListener('click', () => {
 
 // Merge tokens that match custom compound words
 function mergeCompoundWords(tokens, compoundWordsSet) {
+    if (!tokens || tokens.length === 0) return tokens || [];
     if (compoundWordsSet.size === 0) return tokens;
     
     // Sort compound words by length descending so longer phrases match first
@@ -1439,7 +1446,7 @@ function mergeConsecutiveNouns(tokens) {
         
         // Include Nouns and Prefixes. Exclude non-independent and pronouns.
         if (t.pos === '名詞' || t.pos === '接頭詞') {
-            if (t.pos_detail_1 === '非自立' || t.pos_detail_1 === '代名詞') {
+            if (t.pos_detail_1 === '非自立' || t.pos_detail_1 === '代名詞' || t.pos_detail_1 === '数' || t.pos_detail_1 === '接尾') {
                 return false;
             }
             return true;
@@ -1520,6 +1527,7 @@ function processAndRender() {
                 : token.surface_form;
 
             word = word.trim();
+            if (!word) return;
 
             if (word.length === 1 && /^[ぁ-んァ-ヶ]$/.test(word)) return;
             if (/^[0-9０-９\s\.\,\-\_]+$/.test(word)) return;
@@ -1612,7 +1620,8 @@ function processAndRender() {
         // not total occurrence count, for a mathematically correct Jaccard coefficient.
         const cA = docFreq[w1] || 0;
         const cB = docFreq[w2] || 0;
-        const jaccard = fAB / (cA + cB - fAB);
+        const denom = cA + cB - fAB;
+        const jaccard = denom > 0 ? fAB / denom : 0;
         if (jaccard > 0.04) {
             rawEdges.push({ sourceId: w1, targetId: w2, weight: jaccard });
         }
@@ -1818,7 +1827,7 @@ function processAndRender() {
             });
         }
         
-        const k = parseInt(clusterCount.value) || 3;
+        const k = parseInt(clusterCount?.value) || 3;
         const assignments = runKMeans(rawPoints, k);
         
         pcaPoints = rawPoints.map((pt, i) => {
@@ -2117,7 +2126,7 @@ function renderLDATopicView() {
     let cardsHtml = topicsData.map(topic => {
         const sharePct = (topic.share * 100).toFixed(1);
         // Always use light color for the white-background report style
-        const color = topic.lightColor;
+        const color = isDarkTheme ? topic.darkColor : topic.lightColor;
 
         const maxProbInTopic = topic.topWords.length > 0 ? topic.topWords[0].prob : 1;
 
@@ -2272,7 +2281,7 @@ function drawBarChartOnCanvas(canvas, list, rankingMethod, selectedTheme, select
     if (list.length === 0) return;
     
     const getValue = item => rankingMethod === 'tfidf' ? item.tfidf : item.count;
-    const maxVal = getValue(list[0]);
+    const maxVal = Math.max(...list.map(getValue), 0.00001);
     
     const scaleFactor = canvas.width / 1024;
     
@@ -2477,7 +2486,7 @@ function drawNetworkOnCanvas(canvas, nodes, edges, selectedTheme, selectedFont, 
 
     // 2. Draw word nodes
     nodes.forEach(node => {
-        const color = getNetworkNodeColor(selectedTheme, node.communityIndex, isDarkTheme);
+        const color = getNetworkNodeColor(selectedTheme, node, isDarkTheme);
         
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius * scaleFactor, 0, 2 * Math.PI);
@@ -2669,7 +2678,7 @@ function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThem
     const minCount = Math.min(...counts);
     const maxCount = Math.max(...counts);
     
-    const k = parseInt(clusterCount.value) || 3;
+    const k = parseInt(clusterCount?.value) || 3;
     const clusterPoints = Array.from({ length: k }, () => []);
     points.forEach(p => {
         if (p.cluster >= 0 && p.cluster < k) {
@@ -2843,7 +2852,7 @@ function updateWordCloud() {
         if (cloudColorMode === 'cluster') {
             try {
                 const topWordsForCluster = filteredList.map(item => item.text);
-                const clusterResult = findOptimalWordClusters(topWordsForCluster, currentAnalysisCoocCounts, 10);
+                const clusterResult = findOptimalWordClusters(topWordsForCluster, currentAnalysisCoocCounts || {}, 10);
                 
                 autoClusterLegend = `(シルエット法最適K: ${clusterResult.k})`;
                 
@@ -3105,6 +3114,11 @@ downloadBtn.addEventListener('click', () => {
             downloadBtn.disabled = true;
             downloadBtn.innerText = "書き出し中...";
             
+            const exportTimeout = setTimeout(() => {
+                downloadBtn.disabled = false;
+                downloadBtn.innerText = '📷 PNG保存';
+            }, 8000);
+            
             const selectedFont = fontSelect.value;
             const drawShape = shapeCircle.checked ? 'circle' : 'square';
             const isRotate = rotateText.checked;
@@ -3125,12 +3139,37 @@ downloadBtn.addEventListener('click', () => {
                 return [item.text, weight * scaleFactor, item.count, item.tfidf];
             });
 
+            const cloudColorMode = document.getElementById('cloud-color-mode') ? document.getElementById('cloud-color-mode').value : 'random';
+            let wordColorFunc = getColorScheme(selectedTheme, isDarkTheme);
+            
+            if (cloudColorMode === 'cluster') {
+                const topWordsForCluster = filteredList.map(item => item.text);
+                try {
+                    const clusterResult = findOptimalWordClusters(topWordsForCluster, currentAnalysisCoocCounts, 10);
+                    wordColorFunc = function(itemOrWord) {
+                        let wordStr = '';
+                        if (typeof itemOrWord === 'string') wordStr = itemOrWord;
+                        else if (Array.isArray(itemOrWord)) wordStr = itemOrWord[0];
+                        else if (itemOrWord && itemOrWord.text) wordStr = itemOrWord.text;
+                        
+                        const idx = topWordsForCluster.indexOf(wordStr);
+                        if (idx !== -1) {
+                            const clusterId = clusterResult.assignments[idx];
+                            return getNetworkNodeColor(selectedTheme, clusterId, isDarkTheme);
+                        }
+                        return '#999999';
+                    };
+                } catch(e) {
+                    console.error("Clustering error during export:", e);
+                }
+            }
+
             WordCloud(exportCanvas, {
                 list: list,
                 gridSize: Math.round(16 * exportCanvas.width / 1024),
                 weightFactor: 1,
                 fontFamily: selectedFont,
-                color: getColorScheme(selectedTheme),
+                color: wordColorFunc,
                 rotateRatio: isRotate ? 0.35 : 0,
                 rotationSteps: 2,
                 backgroundColor: isDarkTheme ? '#0B0F19' : '#FFFFFF',
@@ -3141,6 +3180,7 @@ downloadBtn.addEventListener('click', () => {
             });
 
             exportCanvas.addEventListener('wordcloudstop', () => {
+                clearTimeout(exportTimeout);
                 const image = exportCanvas.toDataURL("image/png");
                 const link = document.createElement('a');
                 link.download = 'wordcloud.png';
@@ -3239,7 +3279,7 @@ downloadBtn.addEventListener('click', () => {
                 ldaContainer.style.position = 'relative';
 
                 html2canvas(ldaContainer, {
-                    backgroundColor: "#FFFFFF",
+                    backgroundColor: isDarkTheme ? '#0B0F19' : '#FFFFFF',
                     scale: 2,
                     windowHeight: ldaContainer.scrollHeight
                 }).then(canvas => {
@@ -3297,6 +3337,7 @@ function triggerRelayout() {
     } else {
         updateWordCloud();
     }
+    isForceRelayout = false;
 }
 
 if (relayoutBtn) {
@@ -3454,6 +3495,13 @@ if (kwicOverlay) {
     });
 }
 
+// Close KWIC modal with Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && kwicOverlay && kwicOverlay.style.display !== 'none') {
+        closeKWICModal();
+    }
+});
+
 // =========================================================================
 // 8. HIERARCHICAL CLUSTERING & SILHOUETTE OPTIMAL K
 // =========================================================================
@@ -3527,7 +3575,7 @@ function runWardHCA(distMatrix) {
             const w2 = (sizes[c2] + sizeK) / sumSize;
             const w3 = -sizeK / sumSize;
             
-            D[c1][k] = w1 * D[c1][k] + w2 * D[c2][k] + w3 * D[c1][c2];
+            D[c1][k] = Math.max(0, w1 * D[c1][k] + w2 * D[c2][k] + w3 * D[c1][c2]);
             D[k][c1] = D[c1][k];
         }
 
@@ -3591,7 +3639,8 @@ function computeSilhouetteScore(distMatrix, assignments, k) {
         }
 
         if (b_i !== Infinity) {
-            sum += (b_i - a_i) / Math.max(a_i, b_i);
+            const maxDist = Math.max(a_i, b_i);
+            sum += maxDist === 0 ? 0 : (b_i - a_i) / maxDist;
         }
     }
     return sum / n;
