@@ -865,6 +865,13 @@ textarea#raw-text-input:focus {
     flex-direction: column;
     gap: 20px;
     box-sizing: border-box;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--bg-body);
+    z-index: 10;
 }
 
 .lda-header-card {
