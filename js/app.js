@@ -2780,7 +2780,7 @@ function updateWordCloud() {
 
         if (cloudColorMode === 'cluster') {
             const topWordsForCluster = filteredList.map(item => item.text);
-            const clusterResult = findOptimalWordClusters(topWordsForCluster, nodePairs, 10);
+            const clusterResult = findOptimalWordClusters(topWordsForCluster, currentAnalysisCoocCounts, 10);
             
             autoClusterLegend = `(シルエット法最適K: ${clusterResult.k})`;
             
@@ -3377,7 +3377,7 @@ if (kwicOverlay) {
 // =========================================================================
 // 8. HIERARCHICAL CLUSTERING & SILHOUETTE OPTIMAL K
 // =========================================================================
-function computeHCADistanceMatrix(words, nodePairs) {
+function computeHCADistanceMatrix(words, coocCounts) {
     const n = words.length;
     const dist = Array(n).fill(0).map(() => Array(n).fill(1));
     const wordToIndex = new Map(words.map((w, i) => [w, i]));
@@ -3387,17 +3387,20 @@ function computeHCADistanceMatrix(words, nodePairs) {
     
     // Fill from co-occurrences
     let maxWeight = 0;
-    nodePairs.forEach(p => { if (p.weight > maxWeight) maxWeight = p.weight; });
+    Object.values(coocCounts).forEach(weight => { if (weight > maxWeight) maxWeight = weight; });
     if (maxWeight === 0) maxWeight = 1;
 
-    nodePairs.forEach(p => {
-        const i = wordToIndex.get(p.w1);
-        const j = wordToIndex.get(p.w2);
-        if (i !== undefined && j !== undefined) {
-            // Distance = 1 - (weight / maxWeight)
-            const d = 1 - (p.weight / maxWeight);
-            dist[i][j] = d;
-            dist[j][i] = d;
+    Object.entries(coocCounts).forEach(([key, weight]) => {
+        const parts = key.split('|||');
+        if (parts.length === 2) {
+            const i = wordToIndex.get(parts[0]);
+            const j = wordToIndex.get(parts[1]);
+            if (i !== undefined && j !== undefined) {
+                // Distance = 1 - (weight / maxWeight)
+                const d = 1 - (weight / maxWeight);
+                dist[i][j] = d;
+                dist[j][i] = d;
+            }
         }
     });
     return dist;
@@ -3514,11 +3517,11 @@ function computeSilhouetteScore(distMatrix, assignments, k) {
     return sum / n;
 }
 
-function findOptimalWordClusters(words, nodePairs, maxK=10) {
+function findOptimalWordClusters(words, coocCounts, maxK=10) {
     const n = words.length;
     if (n < 3) return { k: 1, assignments: Array(n).fill(0), bestScore: 0 };
     
-    const distMatrix = computeHCADistanceMatrix(words, nodePairs);
+    const distMatrix = computeHCADistanceMatrix(words, coocCounts);
     const maxTestedK = Math.min(maxK, n - 1);
     const history = runWardHCA(distMatrix);
     
