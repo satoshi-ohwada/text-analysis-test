@@ -1425,6 +1425,58 @@ function mergeCompoundWords(tokens, compoundWordsSet) {
 }
 
 // 4. Text Processing (Morphological Analysis, Network, and PCA)
+
+// Automatically merge consecutive nouns into a single compound noun
+function mergeConsecutiveNouns(tokens) {
+    if (!tokens || tokens.length === 0) return tokens;
+    let merged = [];
+    let i = 0;
+    
+    const isNounForMerge = (t) => {
+        if (!t) return false;
+        // Don't merge over user-defined compound words (act as boundaries)
+        if (t.pos_detail_1 === '複合語') return false;
+        
+        // Include Nouns and Prefixes. Exclude non-independent and pronouns.
+        if (t.pos === '名詞' || t.pos === '接頭詞') {
+            if (t.pos_detail_1 === '非自立' || t.pos_detail_1 === '代名詞') {
+                return false;
+            }
+            return true;
+        }
+        return false;
+    };
+
+    while (i < tokens.length) {
+        let t = tokens[i];
+        if (isNounForMerge(t)) {
+            let j = i + 1;
+            let combinedSurface = t.surface_form;
+            
+            while (j < tokens.length && isNounForMerge(tokens[j])) {
+                combinedSurface += tokens[j].surface_form;
+                j++;
+            }
+            
+            if (j > i + 1) {
+                merged.push({
+                    surface_form: combinedSurface,
+                    pos: '名詞',
+                    pos_detail_1: '複合名詞', 
+                    basic_form: combinedSurface
+                });
+            } else {
+                merged.push(t);
+            }
+            i = j;
+        } else {
+            merged.push(t);
+            i++;
+        }
+    }
+    return merged;
+}
+
 function processAndRender() {
     if (!tokenizer || !rawTextData || globalAnalyzedLines.length === 0) return;
 
