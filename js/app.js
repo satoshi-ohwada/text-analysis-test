@@ -706,6 +706,7 @@ maxWordsRange.addEventListener('input', (e) => {
 
 // Render triggers for filters
 [posNoun, posVerb, posAdj, posAdv, mergeNounsCheckbox, document.getElementById('ranking-method')].forEach(elem => {
+    if (!elem) return;
     elem.addEventListener('change', () => {
         if (rawTextData) {
             processAndRender();
@@ -1443,7 +1444,7 @@ function processAndRender() {
 
     globalAnalyzedLines.forEach(originalTokens => {
         let tokens = mergeCompoundWords(originalTokens, customCompoundWords);
-        if (mergeNounsCheckbox.checked) {
+        if (mergeNounsCheckbox && mergeNounsCheckbox.checked) {
             tokens = mergeConsecutiveNouns(tokens);
         }
         
@@ -3296,7 +3297,7 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
         if (!originalTokens || originalTokens.length === 0) continue;
         
         let tokens = mergeCompoundWords(originalTokens, customCompoundWords);
-        if (mergeNounsCheckbox.checked) {
+        if (mergeNounsCheckbox && mergeNounsCheckbox.checked) {
             tokens = mergeConsecutiveNouns(tokens);
         }
         
