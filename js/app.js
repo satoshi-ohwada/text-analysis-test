@@ -49,6 +49,7 @@ const posNoun = document.getElementById('pos-noun');
 const posVerb = document.getElementById('pos-verb');
 const posAdj = document.getElementById('pos-adj');
 const posAdv = document.getElementById('pos-adv');
+const mergeNounsCheckbox = document.getElementById('merge-nouns-checkbox');
 const minCountRange = document.getElementById('min-count-range');
 const minCountVal = document.getElementById('min-count-val');
 const maxWordsRange = document.getElementById('max-words-range');
@@ -703,10 +704,8 @@ maxWordsRange.addEventListener('input', (e) => {
     }
 });
 
-// Settings that require complete NLP reprocessing and clustering recalculation
-// Note: displayType is intentionally excluded here; its change handler is defined
-// separately below to also call updateClusterCountGroupVisibility().
-[posNoun, posVerb, posAdj, posAdv, document.getElementById('ranking-method')].forEach(elem => {
+// Render triggers for filters
+[posNoun, posVerb, posAdj, posAdv, mergeNounsCheckbox, document.getElementById('ranking-method')].forEach(elem => {
     elem.addEventListener('change', () => {
         if (rawTextData) {
             processAndRender();
@@ -1443,7 +1442,11 @@ function processAndRender() {
     const lineWordsList = [];
 
     globalAnalyzedLines.forEach(originalTokens => {
-        const tokens = mergeCompoundWords(originalTokens, customCompoundWords);
+        let tokens = mergeCompoundWords(originalTokens, customCompoundWords);
+        if (mergeNounsCheckbox.checked) {
+            tokens = mergeConsecutiveNouns(tokens);
+        }
+        
         const uniqueWordsInLine = new Set();
         const lineWords = [];
         
@@ -3291,7 +3294,11 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
         // Merge compound words just like we do in processAndRender
         const originalTokens = globalAnalyzedLines[i];
         if (!originalTokens || originalTokens.length === 0) continue;
-        const tokens = mergeCompoundWords(originalTokens, customCompoundWords);
+        
+        let tokens = mergeCompoundWords(originalTokens, customCompoundWords);
+        if (mergeNounsCheckbox.checked) {
+            tokens = mergeConsecutiveNouns(tokens);
+        }
         
         let wordIndices = [];
         for (let j = 0; j < tokens.length; j++) {

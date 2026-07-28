@@ -70,6 +70,13 @@
                     </label>
                 </div>
 
+                <div class="section-title" style="margin-top: 15px;">複合名詞の抽出</div>
+                <div class="checkbox-group">
+                    <label class="checkbox-container" title="「一般」「食料品」など、連続する名詞や接頭辞・接尾辞を自動的に1つの単語として結合します。">
+                        <input type="checkbox" id="merge-nouns-checkbox" checked> 連続する名詞を結合する
+                    </label>
+                </div>
+
                 <div class="select-wrapper">
                     <label for="ranking-method">重要度判定の基準:</label>
                     <select id="ranking-method" class="select-control">
@@ -329,6 +336,6 @@
         </div>
     </div>
 
-    <script src="js/app.js?v=3.4"></script>
+    <script src="js/app.js?v=3.5"></script>
 </body>
 </html>
