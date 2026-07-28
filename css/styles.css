@@ -982,7 +982,6 @@ textarea#raw-text-input:focus {
 .lda-word-bar {
     height: 6px;
     border-radius: 3px;
-    flex-grow: 1;
 }
 
 .lda-word-pct {

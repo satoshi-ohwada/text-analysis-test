@@ -2053,15 +2053,17 @@ function renderLDATopicView() {
 
             return `
                 <div class="lda-word-row" onclick="openWordTopicDetail('${wItem.word}')" title="クリックでこの単語のソフトクラスタリング割合（トピック分布）を表示">
-                    <div class="lda-word-name">
+                    <div class="lda-word-name" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;">
                         <span style="font-size: 11px; font-weight: 700; color: #9CA3AF; width: 16px;">${idx + 1}.</span>
                         <span>${wItem.word}</span>
-                        <span style="font-size: 10px; color: #6B7280; margin-left: 4px; font-weight: normal;">(全体 ${globalCount}回)</span>
+                        <span style="font-size: 10px; color: #6B7280; margin-left: 4px; font-weight: normal;">(${globalCount}回)</span>
                     </div>
                     <div class="lda-word-bar-container" title="トピック内での単語の出現確率（重要度）">
-                        <span style="font-size: 10px; color: #6B7280; margin-right: 2px;">重要度</span>
-                        <div class="lda-word-bar" style="background: ${color}; width: ${relBarWidth}%;"></div>
-                        <div class="lda-word-pct">${probPct}%</div>
+                        <span style="font-size: 10px; color: #6B7280; margin-right: 2px; white-space: nowrap;">重要度</span>
+                        <div style="flex-grow: 1; height: 6px; background: #E5E7EB; border-radius: 3px; overflow: hidden; display: flex;">
+                            <div class="lda-word-bar" style="background: ${color}; width: ${relBarWidth}%; height: 100%;"></div>
+                        </div>
+                        <div class="lda-word-pct" style="width: 32px; text-align: right;">${probPct}%</div>
                     </div>
                 </div>
             `;
@@ -3094,6 +3096,31 @@ downloadBtn.addEventListener('click', () => {
             link.download = 'pca_scatter.png';
             link.href = image;
             link.click();
+        } else if (currentMode === 'topic-lda') {
+            if (!ldaContainer || typeof html2canvas === 'undefined') return;
+            
+            const originalText = downloadBtn.innerHTML;
+            downloadBtn.disabled = true;
+            downloadBtn.innerText = "書き出し中...";
+            
+            html2canvas(ldaContainer, {
+                backgroundColor: "#FFFFFF",
+                scale: 2
+            }).then(canvas => {
+                const image = canvas.toDataURL("image/png");
+                const link = document.createElement('a');
+                link.download = 'topic_lda.png';
+                link.href = image;
+                link.click();
+                
+                downloadBtn.disabled = false;
+                downloadBtn.innerHTML = originalText;
+            }).catch(error => {
+                console.error("html2canvas error:", error);
+                downloadBtn.disabled = false;
+                downloadBtn.innerHTML = originalText;
+                alert("画像の書き出しに失敗しました。\nエラー内容: " + error.message);
+            });
         }
     } catch (error) {
         console.error("PNG export failed:", error);
