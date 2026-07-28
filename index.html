@@ -302,6 +302,11 @@
             <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">
                 読み込まれたCSVファイルには複数の列が含まれています。<br>分析対象（自由記述など）とする列を選択してください。
             </p>
+            <div style="margin-bottom: 12px;">
+                <label class="checkbox-container" style="font-size: 12.5px; font-weight: 600; color: var(--text-primary);">
+                    <input type="checkbox" id="csv-has-header-check" checked> 1行目を項目名（ヘッダー）として扱う
+                </label>
+            </div>
             <div style="margin-bottom: 20px;">
                 <label for="csv-column-select" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--text-primary);">分析対象の列:</label>
                 <select id="csv-column-select" style="width: 100%; padding: 10px 12px; font-size: 13px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-surface); color: var(--text-primary); outline: none;">
@@ -318,6 +323,6 @@
         </div>
     </div>
 
-    <script src="js/app.js?v=1.8"></script>
+    <script src="js/app.js?v=1.9"></script>
 </body>
 </html>

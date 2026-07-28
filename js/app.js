@@ -383,18 +383,25 @@ fileInput.addEventListener('change', (e) => {
 let pendingCsvRows = [];
 
 function parseCSVText(text) {
+    if (!text) return [];
+    // Remove UTF-8 BOM if present
+    text = text.replace(/^\uFEFF/, '');
+
     const lines = [];
     let curLine = [];
     let curVal = '';
     let inQuotes = false;
     
-    // Detect delimiter (comma vs tab vs semicolon)
-    const firstLineEnd = text.indexOf('\n');
-    const sampleLine = firstLineEnd !== -1 ? text.substring(0, firstLineEnd) : text;
+    // Robust delimiter detection
+    const sampleText = text.substring(0, Math.min(2000, text.length));
+    const commaCount = (sampleText.match(/,/g) || []).length;
+    const tabCount = (sampleText.match(/\t/g) || []).length;
+    const semiCount = (sampleText.match(/;/g) || []).length;
+
     let delimiter = ',';
-    if ((sampleLine.match(/\t/g) || []).length > (sampleLine.match(/,/g) || []).length) {
+    if (tabCount > commaCount && tabCount > semiCount) {
         delimiter = '\t';
-    } else if ((sampleLine.match(/;/g) || []).length > (sampleLine.match(/,/g) || []).length) {
+    } else if (semiCount > commaCount && semiCount > tabCount) {
         delimiter = ';';
     }
 
@@ -447,47 +454,69 @@ function showCSVColumnModal(fileName, rows) {
     const csvModalOverlay = document.getElementById('csv-modal-overlay');
     const csvColumnSelect = document.getElementById('csv-column-select');
     const csvColumnPreview = document.getElementById('csv-column-preview');
+    const csvHasHeaderCheck = document.getElementById('csv-has-header-check');
     
     if (!csvModalOverlay || !csvColumnSelect) return;
 
-    csvColumnSelect.innerHTML = '';
-    const colCount = rows[0].length;
-    
-    for (let colIdx = 0; colIdx < colCount; colIdx++) {
-        const headerName = rows[0][colIdx] || `列 ${colIdx + 1}`;
-        let sampleVal = "";
-        for (let r = 1; r < Math.min(10, rows.length); r++) {
-            if (rows[r] && rows[r][colIdx] && rows[r][colIdx].trim()) {
-                sampleVal = rows[r][colIdx].trim();
-                break;
+    const colCount = rows.length > 0 ? Math.max(...rows.map(r => r.length)) : 0;
+    if (colCount === 0) return;
+
+    function populateOptions() {
+        csvColumnSelect.innerHTML = '';
+        const hasHeader = csvHasHeaderCheck ? csvHasHeaderCheck.checked : true;
+        const startRow = hasHeader ? 1 : 0;
+
+        for (let colIdx = 0; colIdx < colCount; colIdx++) {
+            let headerName = "";
+            if (hasHeader && rows[0] && rows[0][colIdx]) {
+                headerName = rows[0][colIdx].trim();
             }
+            
+            // Find sample data
+            let sampleVal = "";
+            for (let r = startRow; r < Math.min(startRow + 10, rows.length); r++) {
+                if (rows[r] && rows[r][colIdx] !== undefined && rows[r][colIdx].trim()) {
+                    sampleVal = rows[r][colIdx].trim();
+                    break;
+                }
+            }
+
+            const option = document.createElement('option');
+            option.value = colIdx;
+
+            const shortSample = sampleVal.length > 25 ? sampleVal.substring(0, 25) + "..." : sampleVal;
+            if (hasHeader && headerName) {
+                option.innerText = `[ ${colIdx + 1}列目 ] "${headerName}" ${shortSample ? `(例: ${shortSample})` : '(データ空)'}`;
+            } else {
+                option.innerText = `[ ${colIdx + 1}列目 ] ${shortSample ? `(例: ${shortSample})` : '(データ空)'}`;
+            }
+            csvColumnSelect.appendChild(option);
         }
-        if (!sampleVal && rows[0][colIdx]) sampleVal = rows[0][colIdx];
-        
-        const option = document.createElement('option');
-        option.value = colIdx;
-        const shortSample = sampleVal.length > 25 ? sampleVal.substring(0, 25) + "..." : sampleVal;
-        option.innerText = `列 ${colIdx + 1}: ${headerName} (例: ${shortSample || '空'})`;
-        csvColumnSelect.appendChild(option);
+        updatePreview();
     }
 
     function updatePreview() {
         const selectedCol = parseInt(csvColumnSelect.value) || 0;
+        const hasHeader = csvHasHeaderCheck ? csvHasHeaderCheck.checked : true;
+        const startRow = hasHeader ? 1 : 0;
+
         let samples = [];
-        for (let r = 1; r < Math.min(6, rows.length); r++) {
-            if (rows[r] && rows[r][selectedCol] && rows[r][selectedCol].trim()) {
-                samples.push(`・${rows[r][selectedCol].trim()}`);
+        for (let r = startRow; r < Math.min(startRow + 5, rows.length); r++) {
+            if (rows[r] && rows[r][selectedCol] !== undefined && rows[r][selectedCol].trim()) {
+                samples.push(`・行${r + 1}: "${rows[r][selectedCol].trim()}"`);
             }
         }
-        if (samples.length === 0 && rows[0] && rows[0][selectedCol]) {
-            samples.push(`・${rows[0][selectedCol].trim()}`);
+        if (csvColumnPreview) {
+            csvColumnPreview.innerHTML = samples.join('<br>') || '（データプレビューなし）';
         }
-        csvColumnPreview.innerHTML = samples.join('<br>') || '（プレビューなし）';
     }
 
+    if (csvHasHeaderCheck) {
+        csvHasHeaderCheck.onchange = populateOptions;
+    }
     csvColumnSelect.onchange = updatePreview;
-    updatePreview();
 
+    populateOptions();
     csvModalOverlay.style.display = 'flex';
 }
 
@@ -497,6 +526,7 @@ function initCSVModalListeners() {
     const csvCancelBtn = document.getElementById('csv-cancel-btn');
     const csvConfirmBtn = document.getElementById('csv-confirm-btn');
     const csvColumnSelect = document.getElementById('csv-column-select');
+    const csvHasHeaderCheck = document.getElementById('csv-has-header-check');
 
     if (csvModalCloseBtn) {
         csvModalCloseBtn.onclick = () => { csvModalOverlay.style.display = 'none'; };
@@ -509,8 +539,11 @@ function initCSVModalListeners() {
             const selectedCol = parseInt(csvColumnSelect.value) || 0;
             if (!pendingCsvRows || pendingCsvRows.length === 0) return;
 
+            const hasHeader = csvHasHeaderCheck ? csvHasHeaderCheck.checked : true;
+            const startRow = hasHeader ? 1 : 0;
+
             const extractedTextLines = [];
-            for (let r = 1; r < pendingCsvRows.length; r++) {
+            for (let r = startRow; r < pendingCsvRows.length; r++) {
                 if (pendingCsvRows[r] && pendingCsvRows[r][selectedCol] !== undefined) {
                     const val = pendingCsvRows[r][selectedCol].trim();
                     if (val.length > 0) extractedTextLines.push(val);
@@ -518,12 +551,8 @@ function initCSVModalListeners() {
             }
 
             if (extractedTextLines.length === 0) {
-                for (let r = 0; r < pendingCsvRows.length; r++) {
-                    if (pendingCsvRows[r] && pendingCsvRows[r][selectedCol] !== undefined) {
-                        const val = pendingCsvRows[r][selectedCol].trim();
-                        if (val.length > 0) extractedTextLines.push(val);
-                    }
-                }
+                alert("選択された列に有効なテキストデータが見つかりませんでした。別の列をお試しください。");
+                return;
             }
 
             csvModalOverlay.style.display = 'none';
