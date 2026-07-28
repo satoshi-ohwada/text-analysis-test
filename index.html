@@ -129,6 +129,14 @@
                     <option value="monochrome-dark">モノクローム (黒地・グレー階調)</option>
                 </select>
 
+                <div id="cloud-color-mode-group" style="margin-top: 10px; margin-bottom: 10px;">
+                    <label for="cloud-color-mode">ワードクラウド配色 (HCA法):</label>
+                    <select id="cloud-color-mode" class="select-control">
+                        <option value="random">ランダム (テーマ準拠)</option>
+                        <option value="cluster">自動クラスタリング (意味・共起で色分け)</option>
+                    </select>
+                </div>
+
                 <label for="font-select">フォント:</label>
                 <select id="font-select" class="select-control">
                     <option value="'BIZ UDP Gothic', sans-serif">BIZ UDPゴシック</option>
@@ -325,6 +333,6 @@
         </div>
     </div>
 
-    <script src="js/app.js?v=2.9"></script>
+    <script src="js/app.js?v=3.0"></script>
 </body>
 </html>

@@ -715,7 +715,11 @@ maxWordsRange.addEventListener('input', (e) => {
 });
 
 // Settings that only require redrawing/rendering updates (no K-means recalculation)
-[colorTheme, fontSelect, shapeCircle, rotateText].forEach(elem => {
+const cloudColorModeSelect = document.getElementById('cloud-color-mode');
+const redrawElements = [colorTheme, fontSelect, shapeCircle, rotateText];
+if (cloudColorModeSelect) redrawElements.push(cloudColorModeSelect);
+
+redrawElements.forEach(elem => {
     elem.addEventListener('change', () => {
         if (rawTextData) {
             updateWordCloud();
@@ -728,6 +732,15 @@ function updateClusterCountGroupVisibility() {
         clusterCountGroup.style.display = 'block';
     } else if (clusterCountGroup) {
         clusterCountGroup.style.display = 'none';
+    }
+    
+    const cloudColorGroup = document.getElementById('cloud-color-mode-group');
+    if (cloudColorGroup) {
+        if (displayType && displayType.value === 'cloud') {
+            cloudColorGroup.style.display = 'block';
+        } else {
+            cloudColorGroup.style.display = 'none';
+        }
     }
 
     if (methodDescription && displayType) {
@@ -2758,12 +2771,48 @@ function updateWordCloud() {
         let lastClickedWord = null;
         let lastClickedTime = 0;
 
+        // Setup Coloring
+        const cloudColorMode = document.getElementById('cloud-color-mode') ? document.getElementById('cloud-color-mode').value : 'random';
+        let wordColorFunc = getColorScheme(selectedTheme, isDarkTheme);
+        
+        // HCA Clustering info for the UI
+        let autoClusterLegend = "";
+
+        if (cloudColorMode === 'cluster') {
+            const topWordsForCluster = filteredList.map(item => item.text);
+            const clusterResult = findOptimalWordClusters(topWordsForCluster, nodePairs, 10);
+            
+            autoClusterLegend = `(シルエット法最適K: ${clusterResult.k})`;
+            
+            // Append info to method description
+            if (methodDescription) {
+                let existingHtml = methodDescription.innerHTML;
+                if (!existingHtml.includes("シルエット法")) {
+                    methodDescription.innerHTML = existingHtml + `<div style="margin-top: 8px; padding: 6px 10px; background: rgba(59, 130, 246, 0.1); border-left: 3px solid var(--accent-blue); border-radius: 4px; font-size: 11px;"><strong>🤖 自動クラスタリング適用中</strong>: 単語間の共起距離を計算し、階層的クラスタリング(Ward法)を実施。<br>シルエット分析による最適なクラスター数は <strong>${clusterResult.k}個</strong> と判定され、色分けに反映しました。</div>`;
+                }
+            }
+
+            wordColorFunc = function(word, weight, fontSize, distance, theta) {
+                const idx = topWordsForCluster.indexOf(word);
+                if (idx !== -1) {
+                    const clusterId = clusterResult.assignments[idx];
+                    return getNetworkNodeColor(selectedTheme, clusterId, isDarkTheme);
+                }
+                return '#999999';
+            };
+        } else {
+            // Restore description if switching back to random
+            if (methodDescription && methodDescription.innerHTML.includes("シルエット法")) {
+                updateClusterCountGroupVisibility();
+            }
+        }
+
         WordCloud(cloudCanvas, {
             list: list,
             gridSize: Math.round(16 * cloudCanvas.width / 1024),
             weightFactor: 1,
             fontFamily: selectedFont,
-            color: getColorScheme(selectedTheme, isDarkTheme),
+            color: wordColorFunc,
             rotateRatio: isRotate ? 0.35 : 0,
             rotationSteps: 2,
             backgroundColor: 'transparent',
@@ -3323,4 +3372,171 @@ if (kwicOverlay) {
             closeKWICModal();
         }
     });
+}
+
+// =========================================================================
+// 8. HIERARCHICAL CLUSTERING & SILHOUETTE OPTIMAL K
+// =========================================================================
+function computeHCADistanceMatrix(words, nodePairs) {
+    const n = words.length;
+    const dist = Array(n).fill(0).map(() => Array(n).fill(1));
+    const wordToIndex = new Map(words.map((w, i) => [w, i]));
+    
+    // Diagonal is 0
+    for(let i = 0; i < n; i++) dist[i][i] = 0;
+    
+    // Fill from co-occurrences
+    let maxWeight = 0;
+    nodePairs.forEach(p => { if (p.weight > maxWeight) maxWeight = p.weight; });
+    if (maxWeight === 0) maxWeight = 1;
+
+    nodePairs.forEach(p => {
+        const i = wordToIndex.get(p.w1);
+        const j = wordToIndex.get(p.w2);
+        if (i !== undefined && j !== undefined) {
+            // Distance = 1 - (weight / maxWeight)
+            const d = 1 - (p.weight / maxWeight);
+            dist[i][j] = d;
+            dist[j][i] = d;
+        }
+    });
+    return dist;
+}
+
+function runWardHCA(distMatrix) {
+    const n = distMatrix.length;
+    let active = Array(n).fill(true);
+    let history = [];
+    let sizes = Array(n).fill(1);
+    
+    let D = [];
+    for (let i = 0; i < n; i++) D.push(distMatrix[i].slice());
+
+    let clusterIdxCount = n;
+
+    for (let step = 0; step < n - 1; step++) {
+        let minD = Infinity;
+        let c1 = -1, c2 = -1;
+
+        for (let i = 0; i < n; i++) {
+            if (!active[i]) continue;
+            for (let j = i + 1; j < n; j++) {
+                if (!active[j]) continue;
+                if (D[i][j] < minD) {
+                    minD = D[i][j];
+                    c1 = i;
+                    c2 = j;
+                }
+            }
+        }
+        
+        if (c1 === -1 || c2 === -1) break;
+
+        history.push({c1, c2, dist: minD});
+        
+        const newSize = sizes[c1] + sizes[c2];
+        
+        for (let k = 0; k < n; k++) {
+            if (k === c1 || k === c2 || !active[k]) continue;
+            const sizeK = sizes[k];
+            const sumSize = newSize + sizeK;
+            const w1 = (sizes[c1] + sizeK) / sumSize;
+            const w2 = (sizes[c2] + sizeK) / sumSize;
+            const w3 = -sizeK / sumSize;
+            
+            D[c1][k] = w1 * D[c1][k] + w2 * D[c2][k] + w3 * D[c1][c2];
+            D[k][c1] = D[c1][k];
+        }
+
+        sizes[c1] = newSize;
+        active[c2] = false;
+        clusterIdxCount++;
+    }
+    return history;
+}
+
+function getClustersFromHistory(n, history, k) {
+    if (k >= n) return Array.from({length: n}, (_, i) => i);
+    if (k === 1) return Array(n).fill(0);
+    
+    let activeSets = Array.from({length: n}, (_, i) => [i]);
+    let active = Array(n).fill(true);
+    
+    const numMerges = Math.min(n - k, history.length);
+    for (let i = 0; i < numMerges; i++) {
+        let merge = history[i];
+        activeSets[merge.c1] = activeSets[merge.c1].concat(activeSets[merge.c2]);
+        active[merge.c2] = false;
+    }
+    
+    let assignment = Array(n).fill(-1);
+    let currentClusterId = 0;
+    for (let i = 0; i < n; i++) {
+        if (active[i]) {
+            for (let item of activeSets[i]) {
+                assignment[item] = currentClusterId;
+            }
+            currentClusterId++;
+        }
+    }
+    return assignment;
+}
+
+function computeSilhouetteScore(distMatrix, assignments, k) {
+    const n = distMatrix.length;
+    let clusterSizes = Array(k).fill(0);
+    for (let i = 0; i < n; i++) clusterSizes[assignments[i]]++;
+
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+        let c_i = assignments[i];
+        if (clusterSizes[c_i] <= 1) continue;
+
+        let distsToClusters = Array(k).fill(0);
+        for (let j = 0; j < n; j++) {
+            if (i === j) continue;
+            distsToClusters[assignments[j]] += distMatrix[i][j];
+        }
+
+        let a_i = distsToClusters[c_i] / (clusterSizes[c_i] - 1);
+        let b_i = Infinity;
+        
+        for (let c = 0; c < k; c++) {
+            if (c === c_i || clusterSizes[c] === 0) continue;
+            let meanDist = distsToClusters[c] / clusterSizes[c];
+            if (meanDist < b_i) b_i = meanDist;
+        }
+
+        if (b_i !== Infinity) {
+            sum += (b_i - a_i) / Math.max(a_i, b_i);
+        }
+    }
+    return sum / n;
+}
+
+function findOptimalWordClusters(words, nodePairs, maxK=10) {
+    const n = words.length;
+    if (n < 3) return { k: 1, assignments: Array(n).fill(0), bestScore: 0 };
+    
+    const distMatrix = computeHCADistanceMatrix(words, nodePairs);
+    const maxTestedK = Math.min(maxK, n - 1);
+    const history = runWardHCA(distMatrix);
+    
+    let bestK = 2;
+    let bestScore = -Infinity;
+    
+    for (let k = 2; k <= maxTestedK; k++) {
+        let assignments = getClustersFromHistory(n, history, k);
+        let score = computeSilhouetteScore(distMatrix, assignments, k);
+        if (score > bestScore) {
+            bestScore = score;
+            bestK = k;
+        }
+    }
+    
+    return {
+        k: bestK,
+        assignments: getClustersFromHistory(n, history, bestK),
+        bestScore
+    };
 }
