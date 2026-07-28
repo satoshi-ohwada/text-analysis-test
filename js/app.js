@@ -3104,10 +3104,25 @@ downloadBtn.addEventListener('click', () => {
             downloadBtn.innerText = "書き出し中...";
 
             const exportLDA = () => {
+                // Temporarily expand container to capture full scrolling content
+                const originalHeight = ldaContainer.style.height;
+                const originalOverflow = ldaContainer.style.overflowY;
+                const originalPosition = ldaContainer.style.position;
+                
+                ldaContainer.style.height = 'auto';
+                ldaContainer.style.overflowY = 'visible';
+                ldaContainer.style.position = 'relative';
+
                 html2canvas(ldaContainer, {
                     backgroundColor: "#FFFFFF",
-                    scale: 2
+                    scale: 2,
+                    windowHeight: ldaContainer.scrollHeight
                 }).then(canvas => {
+                    // Restore original styles
+                    ldaContainer.style.height = originalHeight;
+                    ldaContainer.style.overflowY = originalOverflow;
+                    ldaContainer.style.position = originalPosition;
+
                     const image = canvas.toDataURL("image/png");
                     const link = document.createElement('a');
                     link.download = 'topic_lda.png';
@@ -3117,6 +3132,11 @@ downloadBtn.addEventListener('click', () => {
                     downloadBtn.disabled = false;
                     downloadBtn.innerHTML = originalText;
                 }).catch(error => {
+                    // Restore original styles on error
+                    ldaContainer.style.height = originalHeight;
+                    ldaContainer.style.overflowY = originalOverflow;
+                    ldaContainer.style.position = originalPosition;
+
                     console.error("html2canvas error:", error);
                     downloadBtn.disabled = false;
                     downloadBtn.innerHTML = originalText;
