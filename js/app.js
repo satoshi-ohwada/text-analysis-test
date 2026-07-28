@@ -2779,27 +2779,38 @@ function updateWordCloud() {
         let autoClusterLegend = "";
 
         if (cloudColorMode === 'cluster') {
-            const topWordsForCluster = filteredList.map(item => item.text);
-            const clusterResult = findOptimalWordClusters(topWordsForCluster, currentAnalysisCoocCounts, 10);
-            
-            autoClusterLegend = `(シルエット法最適K: ${clusterResult.k})`;
-            
-            // Append info to method description
-            if (methodDescription) {
-                let existingHtml = methodDescription.innerHTML;
-                if (!existingHtml.includes("シルエット法")) {
-                    methodDescription.innerHTML = existingHtml + `<div style="margin-top: 8px; padding: 6px 10px; background: rgba(59, 130, 246, 0.1); border-left: 3px solid var(--accent-blue); border-radius: 4px; font-size: 11px;"><strong>🤖 自動クラスタリング適用中</strong>: 単語間の共起距離を計算し、階層的クラスタリング(Ward法)を実施。<br>シルエット分析による最適なクラスター数は <strong>${clusterResult.k}個</strong> と判定され、色分けに反映しました。</div>`;
+            try {
+                const topWordsForCluster = filteredList.map(item => item.text);
+                const clusterResult = findOptimalWordClusters(topWordsForCluster, currentAnalysisCoocCounts, 10);
+                
+                autoClusterLegend = `(シルエット法最適K: ${clusterResult.k})`;
+                
+                // Append info to method description
+                if (methodDescription) {
+                    let existingHtml = methodDescription.innerHTML;
+                    if (!existingHtml.includes("シルエット法")) {
+                        methodDescription.innerHTML = existingHtml + `<div style="margin-top: 8px; padding: 6px 10px; background: rgba(59, 130, 246, 0.1); border-left: 3px solid var(--accent-blue); border-radius: 4px; font-size: 11px;"><strong>🤖 自動クラスタリング適用中</strong>: 単語間の共起距離を計算し、階層的クラスタリング(Ward法)を実施。<br>シルエット分析による最適なクラスター数は <strong>${clusterResult.k}個</strong> と判定され、色分けに反映しました。</div>`;
+                    }
                 }
-            }
 
-            wordColorFunc = function(word, weight, fontSize, distance, theta) {
-                const idx = topWordsForCluster.indexOf(word);
-                if (idx !== -1) {
-                    const clusterId = clusterResult.assignments[idx];
-                    return getNetworkNodeColor(selectedTheme, clusterId, isDarkTheme);
-                }
-                return '#999999';
-            };
+                wordColorFunc = function(itemOrWord) {
+                    let wordStr = '';
+                    if (typeof itemOrWord === 'string') wordStr = itemOrWord;
+                    else if (Array.isArray(itemOrWord)) wordStr = itemOrWord[0];
+                    else if (itemOrWord && itemOrWord.text) wordStr = itemOrWord.text;
+                    
+                    const idx = topWordsForCluster.indexOf(wordStr);
+                    if (idx !== -1) {
+                        const clusterId = clusterResult.assignments[idx];
+                        return getNetworkNodeColor(selectedTheme, clusterId, isDarkTheme);
+                    }
+                    return '#999999';
+                };
+            } catch (err) {
+                console.error("Clustering error:", err);
+                alert("自動クラスタリング中にエラーが発生しました: " + err.message);
+                wordColorFunc = getColorScheme(selectedTheme, isDarkTheme);
+            }
         } else {
             // Restore description if switching back to random
             if (methodDescription && methodDescription.innerHTML.includes("シルエット法")) {
