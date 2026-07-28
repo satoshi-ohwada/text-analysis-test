@@ -1394,9 +1394,15 @@ function mergeCompoundWords(tokens, compoundWordsSet) {
         for (const cw of compounds) {
             let combinedStr = "";
             let j = i;
-            while (j < tokens.length && combinedStr.length < cw.length) {
+            while (j < tokens.length) {
                 combinedStr += tokens[j].surface_form;
                 j++;
+                if (combinedStr === cw) {
+                    break;
+                }
+                if (!cw.startsWith(combinedStr)) {
+                    break;
+                }
             }
             if (combinedStr === cw) {
                 mergedTokens.push({
