@@ -168,7 +168,7 @@ function renderStopWords() {
 
     stopwordsList.querySelectorAll('.remove').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            const word = e.target.getAttribute('data-word');
+            const word = e.currentTarget.getAttribute('data-word');
             customStopWords.delete(word);
             renderStopWords();
             if (rawTextData) {
@@ -219,7 +219,7 @@ function renderCompoundWords() {
 
     compoundWordsList.querySelectorAll('.remove').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            const word = e.target.getAttribute('data-word');
+            const word = e.currentTarget.getAttribute('data-word');
             customCompoundWords.delete(word);
             renderCompoundWords();
             if (rawTextData) {
@@ -407,17 +407,20 @@ function parseCSVText(text) {
     if (!text) return [];
     // Remove UTF-8 BOM if present
     text = text.replace(/^\uFEFF/, '');
+    // Normalize line endings (CR-only -> LF, CRLF -> LF)
+    text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
     const lines = [];
     let curLine = [];
     let curVal = '';
     let inQuotes = false;
     
-    // Robust delimiter detection
+    // Robust delimiter detection: strip quoted strings first to avoid counting commas inside quotes
     const sampleText = text.substring(0, Math.min(3000, text.length));
-    const commaCount = (sampleText.match(/,/g) || []).length;
-    const tabCount = (sampleText.match(/\t/g) || []).length;
-    const semiCount = (sampleText.match(/;/g) || []).length;
+    const sampleWithoutQuotes = sampleText.replace(/"[^"]*"/g, '');
+    const commaCount = (sampleWithoutQuotes.match(/,/g) || []).length;
+    const tabCount = (sampleWithoutQuotes.match(/\t/g) || []).length;
+    const semiCount = (sampleWithoutQuotes.match(/;/g) || []).length;
 
     let delimiter = ',';
     if (tabCount > commaCount && tabCount > semiCount) {
@@ -643,7 +646,8 @@ function handleFile(file) {
         const isCsv = file.name.toLowerCase().endsWith('.csv') || file.name.toLowerCase().endsWith('.tsv');
         if (isCsv) {
             const rows = parseCSVText(text);
-            if (rows.length > 0 && rows[0].length > 1) {
+            const isMultiColumn = rows.some(r => r.length > 1);
+            if (isMultiColumn) {
                 showCSVColumnModal(file.name, rows);
                 return;
             }
@@ -715,6 +719,15 @@ function updateClusterCountGroupVisibility() {
         clusterCountGroup.style.display = 'block';
     } else if (clusterCountGroup) {
         clusterCountGroup.style.display = 'none';
+    }
+
+    const ldaTopicCountGroup = document.getElementById('lda-topic-count-group');
+    if (ldaTopicCountGroup) {
+        if (displayType && displayType.value === 'topic-lda') {
+            ldaTopicCountGroup.style.display = 'block';
+        } else {
+            ldaTopicCountGroup.style.display = 'none';
+        }
     }
     
     const cloudColorGroup = document.getElementById('cloud-color-mode-group');
@@ -815,18 +828,28 @@ displayType.addEventListener('change', () => {
     }
 });
 
-[clusterCount].forEach(elem => {
-    elem.addEventListener('change', () => {
-        if (rawTextData) {
-            processAndRender();
-        }
+// clusterCount slider: only re-draw (no full NLP re-parse)
+if (clusterCount) {
+    clusterCount.addEventListener('change', () => {
+        if (rawTextData) updateWordCloud();
     });
-    elem.addEventListener('input', () => {
-        if (rawTextData) {
-            processAndRender();
-        }
+    clusterCount.addEventListener('input', () => {
+        if (rawTextData) updateWordCloud();
     });
-});
+}
+
+// LDA topic count: toggle manual input and re-render
+const ldaTopicModeSelect = document.getElementById('lda-topic-mode');
+const ldaTopicCountInput = document.getElementById('lda-topic-count');
+if (ldaTopicModeSelect && ldaTopicCountInput) {
+    ldaTopicModeSelect.addEventListener('change', () => {
+        ldaTopicCountInput.style.display = ldaTopicModeSelect.value === 'manual' ? 'block' : 'none';
+        if (rawTextData) processAndRender();
+    });
+    ldaTopicCountInput.addEventListener('change', () => {
+        if (rawTextData) processAndRender();
+    });
+}
 
 window.addEventListener('resize', () => {
     if (rawTextData) {
@@ -1390,7 +1413,7 @@ function mergeCompoundWords(tokens, compoundWordsSet) {
                     break;
                 }
             }
-            if (combinedStr === cw) {
+            if (combinedStr === cw || combinedStr.replace(/\s+/g, '') === cw.replace(/\s+/g, '')) {
                 mergedTokens.push({
                     surface_form: cw,
                     pos: '名詞', // Force to Noun
@@ -1566,17 +1589,21 @@ function processAndRender() {
     const totalWords = wordFrequencies.reduce((sum, item) => sum + item.count, 0);
     updateStatsBar(opinionLinesCount, totalWords, wordFrequencies.length);
 
-    // --- MINIMUM DATA WARNING ---
+    // --- MINIMUM DATA WARNING (②) ---
     const dataWarningEl = document.getElementById('data-warning');
     if (dataWarningEl) {
-        if (opinionLinesCount < 10) {
-            dataWarningEl.textContent = `⚠️ データが少なすぎます (${opinionLinesCount}行)。共起・PCA分析には20行以上を推奨します。`;
+        if (opinionLinesCount < 5) {
+            dataWarningEl.textContent = `⚠️ データが少なすぎます（${opinionLinesCount}件）。信頼できる分析には30件以上を推奨します。`;
             dataWarningEl.style.display = 'inline';
             dataWarningEl.style.color = '#EF4444';
-        } else if (opinionLinesCount < 20) {
-            dataWarningEl.textContent = `⚠️ 分析精度向上のため20行以上を推奨 (現在${opinionLinesCount}行)`;
+        } else if (opinionLinesCount < 15) {
+            dataWarningEl.textContent = `⚠️ データが少ない（${opinionLinesCount}件）。ネットワーク・LDAは参考程度にしてください（30件以上推奨）。`;
             dataWarningEl.style.display = 'inline';
             dataWarningEl.style.color = '#F59E0B';
+        } else if (opinionLinesCount < 30) {
+            dataWarningEl.textContent = `💡 ${opinionLinesCount}件のデータです。30件以上になるとより安定した分析結果が得られます。`;
+            dataWarningEl.style.display = 'inline';
+            dataWarningEl.style.color = 'var(--text-muted)';
         } else {
             dataWarningEl.style.display = 'none';
         }
@@ -1657,7 +1684,11 @@ function processAndRender() {
         });
 
     for (let iter = 0; iter < 15; iter++) {
-        nodesList.sort(() => Math.random() - 0.5);
+        // Fisher-Yates shuffle for uniform distribution
+        for (let si = nodesList.length - 1; si > 0; si--) {
+            const sj = Math.floor(Math.random() * (si + 1));
+            [nodesList[si], nodesList[sj]] = [nodesList[sj], nodesList[si]];
+        }
         nodesList.forEach(node => {
             const neighborLabels = {};
             edgesList.forEach(edge => {
@@ -1860,12 +1891,23 @@ function runLDAAnalysis(lineWordsList, allowedWordsList) {
 
     const D = docTokens.length;
 
-    // Evaluate Candidate Topic Numbers K in [2..6]
-    const candidateK = [2, 3, 4, 5, 6].filter(k => k <= Math.min(D, V));
-    if (candidateK.length === 0) candidateK.push(2);
+    // Check if user manually specified topic count
+    const ldaTopicModeEl = document.getElementById('lda-topic-mode');
+    const ldaTopicCountEl = document.getElementById('lda-topic-count');
+    const isManualK = ldaTopicModeEl && ldaTopicModeEl.value === 'manual';
+    const manualK = ldaTopicCountEl ? parseInt(ldaTopicCountEl.value) : 3;
 
-    let bestK = 3;
-    let minPerplexity = Infinity;
+    let bestK;
+    if (isManualK && manualK >= 2 && manualK <= 10) {
+        // Use the manually specified K directly — skip perplexity evaluation
+        bestK = Math.min(manualK, Math.min(D, V));
+    } else {
+        // Evaluate Candidate Topic Numbers K in [2..6]
+        const candidateK = [2, 3, 4, 5, 6].filter(k => k <= Math.min(D, V));
+        if (candidateK.length === 0) candidateK.push(2);
+
+        bestK = 3;
+        let minPerplexity = Infinity;
 
     candidateK.forEach(K => {
         const alpha = 50 / K;
@@ -1941,12 +1983,13 @@ function runLDAAnalysis(lineWordsList, allowedWordsList) {
 
         const perplexity = Math.exp(-logP / (totalWords || 1));
         if (perplexity < minPerplexity) {
-            minPerplexity = perplexity;
-            bestK = K;
-        }
-    });
+                minPerplexity = perplexity;
+                bestK = K;
+            }
+        });
 
-    if (D >= 12 && V >= 15 && bestK < 3) bestK = 3;
+        if (D >= 12 && V >= 15 && bestK < 3) bestK = 3;
+    } // end of auto K selection
 
     // --- Final Sampling for Best K ---
     const K = bestK;
@@ -2835,16 +2878,15 @@ function updateWordCloud() {
                 
                 autoClusterLegend = `(シルエット法最適K: ${clusterResult.k})`;
                 
-                // Append info to method description
-                if (methodDescription) {
-                    let existingHtml = methodDescription.innerHTML;
-                    if (!existingHtml.includes("自動クラスタリング適用中")) {
-                        methodDescription.innerHTML = existingHtml + `<div style="margin-top: 8px; padding: 6px 10px; background: rgba(59, 130, 246, 0.1); border-left: 3px solid var(--accent-blue); border-radius: 4px; font-size: 11px;"><strong>🤖 自動クラスタリング適用中</strong>: 単語間の共起距離を計算し、階層的クラスタリング(Ward法)を実施。<br>シルエット分析による最適なクラスター数は <strong>${clusterResult.k}個</strong> と判定され、色分けに反映しました。</div>`;
-                    } else {
-                        // Update the K count without appending a new box
-                        methodDescription.innerHTML = existingHtml.replace(/<strong>\d+個<\/strong>/, `<strong>${clusterResult.k}個</strong>`);
-                    }
+                // Update or create the cluster info box
+                let clusterInfoBox = methodDescription.querySelector('#cluster-info-box');
+                if (!clusterInfoBox) {
+                    clusterInfoBox = document.createElement('div');
+                    clusterInfoBox.id = 'cluster-info-box';
+                    clusterInfoBox.style.cssText = 'margin-top: 8px; padding: 6px 10px; background: rgba(59, 130, 246, 0.1); border-left: 3px solid var(--accent-blue); border-radius: 4px; font-size: 11px;';
+                    methodDescription.appendChild(clusterInfoBox);
                 }
+                clusterInfoBox.innerHTML = `<strong>🤖 自動クラスタリング適用中</strong>: 単語間の共起距離を計算し、階層的クラスタリング(Ward法)を実施。<br>シルエット分析による最適なクラスター数は <strong>${clusterResult.k}個</strong> と判定され、色分けに反映しました。`;
 
                 wordColorFunc = function(itemOrWord) {
                     let wordStr = '';
@@ -2865,9 +2907,10 @@ function updateWordCloud() {
                 wordColorFunc = getColorScheme(selectedTheme, isDarkTheme);
             }
         } else {
-            // Restore description if switching back to random
-            if (methodDescription && methodDescription.innerHTML.includes("自動クラスタリング適用中")) {
-                updateClusterCountGroupVisibility();
+            // Remove cluster info box if switching away from cluster mode
+            if (methodDescription) {
+                const clusterInfoBox = methodDescription.querySelector('#cluster-info-box');
+                if (clusterInfoBox) clusterInfoBox.remove();
             }
         }
 
@@ -3055,6 +3098,137 @@ function updateWordCloud() {
         if (ldaContainer) ldaContainer.style.display = 'block';
         renderLDATopicView();
     }
+
+    // ① 自動コメント + ③ 次のステップ提案
+    renderAnalysisSummary(currentDisplayType, filteredList);
+}
+
+// =====================================================================
+// ① ② ③  分析サマリーパネル（自動コメント・警告・次のステップ）
+// =====================================================================
+function renderAnalysisSummary(mode, filteredList) {
+    const panel = document.getElementById('analysis-summary');
+    if (!panel) return;
+
+    const lines = opinionLinesCount;
+    const uniqueW = wordFrequencies.length;
+    const top1 = filteredList[0];
+    const top2 = filteredList[1];
+    const top3 = filteredList[2];
+
+    // ② データ量に応じた注意文
+    let dataNote = '';
+    if (lines < 5) {
+        dataNote = `<span style="color:#EF4444;font-weight:600;">⚠️ データが${lines}件と非常に少ないため、以下の分析結果はあくまで参考値です。</span>`;
+    } else if (lines < 15) {
+        dataNote = `<span style="color:#F59E0B;font-weight:600;">⚠️ データが${lines}件です。30件以上あると分析の信頼性が高まります。</span>`;
+    } else if (lines < 30) {
+        dataNote = `<span style="color:var(--text-muted);">💡 ${lines}件のデータです。件数が増えるほど安定した結果が得られます。</span>`;
+    }
+
+    let commentHtml = '';
+    let nextHtml = '';
+
+    if (mode === 'cloud') {
+        // ① ワードクラウド用コメント
+        if (top1) {
+            const topWords = filteredList.slice(0, 3).map(w => `「${w.text}」(${w.count}回)`).join('、');
+            commentHtml = `
+                <b>📊 この結果から読み取れること：</b><br>
+                最も多く出現した語は <b>「${top1.text}」（${top1.count}回）</b> です。
+                ${top2 ? `次いで「${top2.text}」（${top2.count}回）` : ''}${top3 ? `、「${top3.text}」（${top3.count}回）` : ''}が続きます。<br>
+                全体で <b>${uniqueW}種類</b> の語が使われており、${lines}件の回答から抽出しました。<br>
+                語の大きさは出現回数に比例します。大きい語が回答全体のキーワードです。
+                ${filteredList.length > 10 ? `<br><span style="color:var(--text-muted);">💡 ヒント：「特徴度(TF-IDF)順」に切り替えると、この回答集に特有の語が大きく表示されます。</span>` : ''}`;
+        }
+        // ③ 次のステップ
+        nextHtml = `
+            <b>👉 次のステップ：</b>
+            全体のキーワードが把握できたら、
+            <span style="color:var(--accent-blue);cursor:pointer;text-decoration:underline;" onclick="document.getElementById('display-type').value='chart';document.getElementById('display-type').dispatchEvent(new Event('change'));">横棒グラフ</span>
+            で頻出語を数値で確認するか、
+            <span style="color:var(--accent-blue);cursor:pointer;text-decoration:underline;" onclick="document.getElementById('display-type').value='network';document.getElementById('display-type').dispatchEvent(new Event('change'));">共起ネットワーク</span>
+            で語の関係・テーマを探ってみましょう。`;
+
+    } else if (mode === 'chart') {
+        // ① 棒グラフ用コメント
+        if (top1) {
+            commentHtml = `
+                <b>📊 この結果から読み取れること：</b><br>
+                最頻出語は <b>「${top1.text}」（${top1.count}回）</b> です。
+                上位語を見ることで、回答者の関心が集中しているテーマが分かります。<br>
+                <span style="color:var(--text-muted);">💡 「特徴度(TF-IDF)順」に切り替えると、単なる高頻度語ではなく<b>この回答集ならではの特徴語</b>が上位に来ます。他のデータと比較したいときに有効です。</span>`;
+        }
+        // ③ 次のステップ
+        nextHtml = `
+            <b>👉 次のステップ：</b>
+            「どの語が一緒に使われているか」を見るには
+            <span style="color:var(--accent-blue);cursor:pointer;text-decoration:underline;" onclick="document.getElementById('display-type').value='network';document.getElementById('display-type').dispatchEvent(new Event('change'));">共起ネットワーク</span>
+            が有効です。語の<b>関係・文脈・テーマ</b>が浮かび上がります。`;
+
+    } else if (mode === 'network') {
+        // ① 共起ネットワーク用コメント
+        const nodeCount = networkNodes.length;
+        const edgeCount = networkEdges.length;
+        const communities = new Set(networkNodes.map(n => n.community)).size;
+        commentHtml = `
+            <b>📊 この結果から読み取れること：</b><br>
+            <b>${nodeCount}語・${edgeCount}本</b>の関係線が描かれています。
+            色の異なるグループが <b>${communities}つ</b> 検出されました（自動コミュニティ分割）。<br>
+            同じ色の語は同じ回答の中でよく一緒に使われており、<b>1つのテーマ・話題</b>を形成している可能性があります。<br>
+            <span style="color:var(--text-muted);">💡 「最小出現回数」を上げると主要な語だけが残り、テーマがより明確になります。語をクリックするとKWIC（用例）を確認できます。</span>`;
+        // ③ 次のステップ
+        nextHtml = `
+            <b>👉 次のステップ：</b>
+            グループのテーマを確認したら、
+            <span style="color:var(--accent-blue);cursor:pointer;text-decoration:underline;" onclick="document.getElementById('display-type').value='topic-lda';document.getElementById('display-type').dispatchEvent(new Event('change'));">トピック分析(LDA)</span>
+            で、各回答がどのテーマに属するか統計的に確認できます。`;
+
+    } else if (mode === 'pca') {
+        // ① PCA用コメント
+        const k = parseInt(clusterCount?.value) || 3;
+        commentHtml = `
+            <b>📊 この結果から読み取れること：</b><br>
+            近くに配置された語ほど<b>似た文脈で使われる語</b>です。
+            ${k}色のグループに自動分類されています。<br>
+            横軸(PC1)・縦軸(PC2)はそれぞれ回答全体の傾向をまとめた「主な方向性」を表します
+            （寄与率が低くても、テキスト分析では正常です）。<br>
+            <span style="color:var(--text-muted);">💡 点が離れているほど、他と違う文脈で使われる語です。共起ネットワークと合わせて見ると理解が深まります。</span>`;
+        nextHtml = `
+            <b>👉 次のステップ：</b>
+            <span style="color:var(--accent-blue);cursor:pointer;text-decoration:underline;" onclick="document.getElementById('display-type').value='topic-lda';document.getElementById('display-type').dispatchEvent(new Event('change'));">トピック分析(LDA)</span>
+            で、文書単位のテーマ分布を確認できます。`;
+
+    } else if (mode === 'topic-lda') {
+        // ① LDA用コメント
+        if (currentLdaResult) {
+            const k = currentLdaResult.topics ? currentLdaResult.topics.length : '?';
+            const ldaTopicModeEl = document.getElementById('lda-topic-mode');
+            const isManual = ldaTopicModeEl && ldaTopicModeEl.value === 'manual';
+            commentHtml = `
+                <b>📊 この結果から読み取れること：</b><br>
+                ${lines}件の回答から <b>${k}つのトピック（潜在的テーマ）</b> が抽出されました
+                （${isManual ? '手動指定' : 'パープレキシティによる自動選択'}）。<br>
+                各カードに表示された上位語がそのトピックを特徴づける語です。<b>代表語を見てテーマに名前をつけてみましょう。</b><br>
+                <span style="color:var(--text-muted);">⚠️ LDAは確率的モデルのため、実行のたびに結果が若干変わることがあります。傾向の把握に活用してください。<br>
+                💡 トピック数を変えたい場合は「表示形式」の下の「トピック数(LDA)」設定から手動指定できます。</span>`;
+        }
+        nextHtml = `
+            <b>👉 各トピックの語をクリック</b>するとKWIC（文中の使われ方）を確認できます。
+            共起ネットワークで見たグループと照らし合わせると、テーマの解釈が深まります。`;
+    }
+
+    // パネルを組み立てて表示
+    const parts = [dataNote, commentHtml, nextHtml].filter(p => p);
+    if (parts.length === 0) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    panel.innerHTML = parts.map((p, i) =>
+        `<div style="${i < parts.length - 1 ? 'margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border-color);' : ''}">${p}</div>`
+    ).join('');
+    panel.style.display = 'block';
 }
 
 // 6. Download Word Cloud, Bar Chart, Network Diagram, or PCA Scatter Plot as Image

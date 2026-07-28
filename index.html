@@ -123,6 +123,16 @@
                     <input type="number" id="cluster-count" min="2" max="8" value="3" class="select-control" style="width: 100%; box-sizing: border-box;">
                 </div>
 
+                <div id="lda-topic-count-group" style="display: none; margin-top: 10px; margin-bottom: 10px;">
+                    <label for="lda-topic-mode">トピック数 (LDA):</label>
+                    <select id="lda-topic-mode" class="select-control" style="width: 100%; margin-bottom: 6px;">
+                        <option value="auto">自動（パープレキシティで最適化）</option>
+                        <option value="manual">手動で指定</option>
+                    </select>
+                    <input type="number" id="lda-topic-count" min="2" max="10" value="3" class="select-control" style="width: 100%; box-sizing: border-box; display: none;">
+                </div>
+
+
                 <label for="color-theme">カラーテーマ:</label>
                 <select id="color-theme" class="select-control">
                     <!-- Light Background Themes -->
@@ -257,6 +267,9 @@
                 <div class="tooltip" id="tooltip"></div>
             </div>
 
+            <!-- Analysis Summary Panel -->
+            <div id="analysis-summary" style="display:none; padding: 10px 18px; background: var(--bg-surface); border-top: 1px solid var(--border-color); font-size: 12.5px; line-height: 1.7; color: var(--text-secondary);"></div>
+
             <!-- Simple stats bar -->
             <footer class="stats-bar" id="stats-bar">
                 <div>総数: <span id="stat-lines">0</span> 件</div>
@@ -264,6 +277,7 @@
                 <div>異なり単語数: <span id="stat-words">0</span> 語</div>
                 <div><span id="data-warning" style="display:none; font-weight:600; font-size:12px;"></span></div>
             </footer>
+
         </main>
     </div>
     
