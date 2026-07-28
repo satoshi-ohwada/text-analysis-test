@@ -858,3 +858,126 @@ textarea#raw-text-input:focus {
     font-family: monospace;
     font-size: 12px;
 }
+
+/* LDA Topic Model View Styles */
+.lda-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    box-sizing: border-box;
+}
+
+.lda-header-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 16px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: var(--shadow-sm);
+}
+
+.lda-header-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.lda-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+}
+
+.lda-topic-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.lda-topic-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.lda-topic-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.lda-topic-name {
+    font-weight: 700;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+}
+
+.lda-topic-badge {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.lda-word-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.lda-word-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: var(--bg-body);
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.lda-word-row:hover {
+    background: rgba(59, 130, 246, 0.08);
+}
+
+.lda-word-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.lda-word-bar-container {
+    width: 100px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.lda-word-bar {
+    height: 6px;
+    border-radius: 3px;
+    flex-grow: 1;
+}
+
+.lda-word-pct {
+    font-size: 11px;
+    font-family: monospace;
+    color: var(--text-muted);
+    width: 34px;
+    text-align: right;
+}

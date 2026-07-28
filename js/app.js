@@ -24,6 +24,9 @@ let pcaPoints = [];
 let pcaExplainedVar1 = '--'; // Variance explained by PC1 (%)
 let pcaExplainedVar2 = '--'; // Variance explained by PC2 (%)
 
+// LDA Topic Model State
+let currentLdaResult = null;
+
 // Initialize UI Elements
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
@@ -34,6 +37,7 @@ const loadingText = document.getElementById('loading-text');
 const progressBar = document.getElementById('progress-bar');
 const cloudCanvas = document.getElementById('cloud-canvas');
 const chartContainer = document.getElementById('chart-container');
+const ldaContainer = document.getElementById('lda-container');
 const emptyState = document.getElementById('empty-state');
 const tooltip = document.getElementById('tooltip');
 const downloadBtn = document.getElementById('download-btn');
@@ -671,6 +675,19 @@ function updateClusterCountGroupVisibility() {
                 </ul>
                 <div class="tips-note">💡 「クラスター数」を変えるとグループ分けが変わります。共起ネットワークのグループと見比べると、より深い洞察が得られます。</div>
             </div>`;
+        } else if (type === 'topic-lda') {
+            descHtml = `
+            <div class="method-title"><span class="method-icon">🧠</span>トピック分析 (LDAモデル・潜在話題)</div>
+            <div class="method-purpose">文書全体に潜む潜在的な話題（トピック）を自動抽出し、各トピックを象徴する代表的なキーワードTop10を提示します。</div>
+            <div class="reading-tips">
+                <div class="tips-title">📌 読み方のポイント</div>
+                <ul class="tips-list">
+                    <li><strong>自動選出トピック</strong> = 統計的適合度（Perplexity）に基づき最適話題数が全自動決定されます</li>
+                    <li><strong>ソフトクラスタリング</strong> = 単語は単一グループに固定されず、複数のトピックへの所属確率（混合比率）を持ちます</li>
+                    <li><strong>単語をクリック</strong>すると、その単語の各トピックへの確率分布と元の文章（KWIC）を確認できます</li>
+                </ul>
+                <div class="tips-note">💡 各トピックの代表語を見ることで、テキスト全体にどのようなテーマが潜んでいるかが分かります。</div>
+            </div>`;
         }
 
         methodDescription.innerHTML = descHtml;
@@ -803,8 +820,14 @@ cloudCanvas.addEventListener('mousemove', (e) => {
                 .slice(0, 5)
                 .join(', ');
                 
+            const selectedTheme = colorTheme.value;
+            let ldaTopicText = '';
+            if (selectedTheme === 'topic-lda' && currentLdaResult && currentLdaResult.wordTopics[hoveredNode.id]) {
+                const tInfo = currentLdaResult.wordTopics[hoveredNode.id];
+                ldaTopicText = `<br><span style="color: var(--accent-blue); font-weight: 600;">所属トピック: ${tInfo.label} (${(tInfo.prob * 100).toFixed(0)}%)</span>`;
+            }
             const connText = connections ? `<br>主な共起語: ${connections}` : '';
-            tooltip.innerHTML = `<strong>${hoveredNode.id}</strong><br>出現回数: ${hoveredNode.count}回<br>グループ: ${hoveredNode.communityLabel}${connText}<br><small style="color: var(--text-muted)">ダブルクリックで除外</small>`;
+            tooltip.innerHTML = `<strong>${hoveredNode.id}</strong><br>出現回数: ${hoveredNode.count}回<br>グループ: ${hoveredNode.communityLabel}${ldaTopicText}${connText}<br><small style="color: var(--text-muted)">ダブルクリックで除外</small>`;
             cloudCanvas.style.cursor = 'pointer';
         } else {
             tooltip.style.display = 'none';
@@ -854,7 +877,13 @@ cloudCanvas.addEventListener('mousemove', (e) => {
             tooltip.style.left = `${e.clientX - canvasContainer.getBoundingClientRect().left + 15}px`;
             tooltip.style.top = `${e.clientY - canvasContainer.getBoundingClientRect().top + 15}px`;
             
-            tooltip.innerHTML = `<strong>${hoveredPoint.word}</strong><br>出現回数: ${hoveredPoint.count}回<br>クラスター: C${hoveredPoint.cluster + 1}<br><small style="color: var(--text-muted)">ダブルクリックで除外</small>`;
+            const selectedTheme = colorTheme.value;
+            let ldaTopicText = '';
+            if (selectedTheme === 'topic-lda' && currentLdaResult && currentLdaResult.wordTopics[hoveredPoint.word]) {
+                const tInfo = currentLdaResult.wordTopics[hoveredPoint.word];
+                ldaTopicText = `<br><span style="color: var(--accent-blue); font-weight: 600;">所属トピック: ${tInfo.label} (${(tInfo.prob * 100).toFixed(0)}%)</span>`;
+            }
+            tooltip.innerHTML = `<strong>${hoveredPoint.word}</strong><br>出現回数: ${hoveredPoint.count}回<br>クラスター: C${hoveredPoint.cluster + 1}${ldaTopicText}<br><small style="color: var(--text-muted)">ダブルクリックで除外</small>`;
             cloudCanvas.style.cursor = 'pointer';
         } else {
             tooltip.style.display = 'none';
@@ -1604,12 +1633,419 @@ function processAndRender() {
         pcaPoints = [];
     }
 
+    // --- LDA TOPIC MODELING & AUTOMATIC TOPIC NUMBER SELECTION ---
+    runLDAAnalysis(globalAnalyzedLines, filteredList.map(w => w.text));
+
     resizeCanvas();
     updateWordCloud();
 }
 
-// Get color schemes
-function getColorScheme(theme) {
+// LDA Topic Modeling with Automatic Optimal K Selection
+function runLDAAnalysis(analyzedLines, allowedWordsList) {
+    if (!allowedWordsList || allowedWordsList.length === 0 || !analyzedLines || analyzedLines.length === 0) {
+        currentLdaResult = null;
+        return;
+    }
+
+    const vocab = allowedWordsList;
+    const vocabSet = new Set(vocab);
+    const vocabIndexMap = new Map();
+    vocab.forEach((word, idx) => vocabIndexMap.set(word, idx));
+
+    const V = vocab.length;
+    
+    // Construct document token lists
+    const docTokens = [];
+    analyzedLines.forEach(originalTokens => {
+        const tokens = mergeCompoundWords(originalTokens, customCompoundWords);
+        const docWords = [];
+        tokens.forEach(token => {
+            let word = (token.pos === '動詞' || token.pos === '形容詞' || token.pos === '副詞') && token.basic_form !== '*' 
+                ? token.basic_form 
+                : token.surface_form;
+            word = word.trim();
+            if (vocabSet.has(word)) {
+                docWords.push(vocabIndexMap.get(word));
+            }
+        });
+        if (docWords.length > 0) {
+            docTokens.push(docWords);
+        }
+    });
+
+    if (docTokens.length === 0) {
+        currentLdaResult = null;
+        return;
+    }
+
+    const D = docTokens.length;
+
+    // Evaluate Candidate Topic Numbers K in [2..6]
+    const candidateK = [2, 3, 4, 5, 6].filter(k => k <= Math.min(D, V));
+    if (candidateK.length === 0) candidateK.push(2);
+
+    let bestK = 3;
+    let minPerplexity = Infinity;
+
+    candidateK.forEach(K => {
+        const alpha = 50 / K;
+        const beta = 0.1;
+
+        const n_dk = Array.from({ length: D }, () => new Int32Array(K));
+        const n_kw = Array.from({ length: K }, () => new Int32Array(V));
+        const n_k = new Int32Array(K);
+        const z_di = docTokens.map(doc => new Int32Array(doc.length));
+
+        // Initialization
+        docTokens.forEach((doc, d) => {
+            doc.forEach((w, i) => {
+                const k = Math.floor(Math.random() * K);
+                z_di[d][i] = k;
+                n_dk[d][k]++;
+                n_kw[k][w]++;
+                n_k[k]++;
+            });
+        });
+
+        // Fast Gibbs Sampling (15 iterations)
+        for (let iter = 0; iter < 15; iter++) {
+            docTokens.forEach((doc, d) => {
+                doc.forEach((w, i) => {
+                    let oldK = z_di[d][i];
+                    n_dk[d][oldK]--;
+                    n_kw[oldK][w]--;
+                    n_k[oldK]--;
+
+                    const probs = new Float64Array(K);
+                    let sumP = 0;
+                    for (let k = 0; k < K; k++) {
+                        const p = (n_dk[d][k] + alpha) * (n_kw[k][w] + beta) / (n_k[k] + V * beta);
+                        probs[k] = p;
+                        sumP += p;
+                    }
+
+                    let r = Math.random() * sumP;
+                    let newK = 0;
+                    for (let k = 0; k < K; k++) {
+                        r -= probs[k];
+                        if (r <= 0) {
+                            newK = k;
+                            break;
+                        }
+                    }
+
+                    z_di[d][i] = newK;
+                    n_dk[d][newK]++;
+                    n_kw[newK][w]++;
+                    n_k[newK]++;
+                });
+            });
+        }
+
+        // Evaluate Log-Likelihood / Perplexity
+        let logP = 0;
+        let totalWords = 0;
+        docTokens.forEach((doc, d) => {
+            const docLen = doc.length;
+            totalWords += docLen;
+            doc.forEach(w => {
+                let pW = 0;
+                for (let k = 0; k < K; k++) {
+                    const pTheta = (n_dk[d][k] + alpha) / (docLen + K * alpha);
+                    const pPhi = (n_kw[k][w] + beta) / (n_k[k] + V * beta);
+                    pW += pTheta * pPhi;
+                }
+                logP += Math.log(pW || 1e-10);
+            });
+        });
+
+        const perplexity = Math.exp(-logP / (totalWords || 1));
+        if (perplexity < minPerplexity) {
+            minPerplexity = perplexity;
+            bestK = K;
+        }
+    });
+
+    if (D >= 12 && V >= 15 && bestK < 3) bestK = 3;
+
+    // --- Final Sampling for Best K ---
+    const K = bestK;
+    const alpha = 50 / K;
+    const beta = 0.1;
+
+    const n_dk = Array.from({ length: D }, () => new Int32Array(K));
+    const n_kw = Array.from({ length: K }, () => new Int32Array(V));
+    const n_k = new Int32Array(K);
+    const z_di = docTokens.map(doc => new Int32Array(doc.length));
+
+    docTokens.forEach((doc, d) => {
+        doc.forEach((w, i) => {
+            const k = Math.floor(Math.random() * K);
+            z_di[d][i] = k;
+            n_dk[d][k]++;
+            n_kw[k][w]++;
+            n_k[k]++;
+        });
+    });
+
+    for (let iter = 0; iter < 50; iter++) {
+        docTokens.forEach((doc, d) => {
+            doc.forEach((w, i) => {
+                let oldK = z_di[d][i];
+                n_dk[d][oldK]--;
+                n_kw[oldK][w]--;
+                n_k[oldK]--;
+
+                const probs = new Float64Array(K);
+                let sumP = 0;
+                for (let k = 0; k < K; k++) {
+                    const p = (n_dk[d][k] + alpha) * (n_kw[k][w] + beta) / (n_k[k] + V * beta);
+                    probs[k] = p;
+                    sumP += p;
+                }
+
+                let r = Math.random() * sumP;
+                let newK = 0;
+                for (let k = 0; k < K; k++) {
+                    r -= probs[k];
+                    if (r <= 0) {
+                        newK = k;
+                        break;
+                    }
+                }
+
+                z_di[d][i] = newK;
+                n_dk[d][newK]++;
+                n_kw[newK][w]++;
+                n_k[newK]++;
+            });
+        });
+    }
+
+    const lightPalette = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'];
+    const darkPalette  = ['#F87171', '#60A5FA', '#34D399', '#FBBF24', '#A78BFA', '#F472B6'];
+
+    // Overall topic proportions
+    let totalAllWords = 0;
+    for (let k = 0; k < K; k++) totalAllWords += n_k[k];
+
+    const topicsData = [];
+    for (let k = 0; k < K; k++) {
+        const topicLetter = String.fromCharCode(65 + (k % 26));
+        const share = totalAllWords > 0 ? (n_k[k] / totalAllWords) : (1 / K);
+        
+        // Find top 10 words for topic k
+        const wordProbs = [];
+        vocab.forEach((word, wIdx) => {
+            const count = n_kw[k][wIdx];
+            const prob = (count + beta) / (n_k[k] + V * beta);
+            if (count > 0) {
+                wordProbs.push({ word, count, prob });
+            }
+        });
+
+        wordProbs.sort((a, b) => b.prob - a.prob);
+        const topWords = wordProbs.slice(0, 10);
+
+        topicsData.push({
+            topicIndex: k,
+            label: `トピック ${topicLetter}`,
+            share: share,
+            totalWords: n_k[k],
+            lightColor: lightPalette[k % lightPalette.length],
+            darkColor: darkPalette[k % darkPalette.length],
+            topWords: topWords
+        });
+    }
+
+    const wordTopics = {};
+    vocab.forEach((word, wIdx) => {
+        let maxTopic = 0;
+        let maxCount = -1;
+        let totalW = 0;
+
+        for (let k = 0; k < K; k++) {
+            const cnt = n_kw[k][wIdx];
+            totalW += cnt;
+            if (cnt > maxCount) {
+                maxCount = cnt;
+                maxTopic = k;
+            }
+        }
+
+        const topicDist = [];
+        for (let k = 0; k < K; k++) {
+            const cnt = n_kw[k][wIdx];
+            const p = totalW > 0 ? (cnt / totalW) : (1 / K);
+            topicDist.push({
+                topicIndex: k,
+                label: `トピック ${String.fromCharCode(65 + (k % 26))}`,
+                prob: p,
+                lightColor: lightPalette[k % lightPalette.length],
+                darkColor: darkPalette[k % darkPalette.length]
+            });
+        }
+        topicDist.sort((a, b) => b.prob - a.prob);
+
+        const prob = totalW > 0 ? (maxCount / totalW) : (1 / K);
+        const topicLetter = String.fromCharCode(65 + (maxTopic % 26));
+        wordTopics[word] = {
+            topicIndex: maxTopic,
+            label: `トピック ${topicLetter}`,
+            prob: prob,
+            topicDist: topicDist,
+            lightColor: lightPalette[maxTopic % lightPalette.length],
+            darkColor: darkPalette[maxTopic % darkPalette.length]
+        };
+    });
+
+    currentLdaResult = {
+        k: K,
+        wordTopics: wordTopics,
+        topicsData: topicsData,
+        lightPalette: lightPalette,
+        darkPalette: darkPalette
+    };
+}
+
+// Render LDA Topic View (Topic Cards Grid)
+function renderLDATopicView() {
+    if (!ldaContainer) return;
+    
+    if (!currentLdaResult || !currentLdaResult.topicsData || currentLdaResult.topicsData.length === 0) {
+        ldaContainer.style.display = 'block';
+        ldaContainer.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 40px;">データまたはトピック結果がありません。「最小出現回数」を調整してください。</div>`;
+        return;
+    }
+
+    const { k, topicsData } = currentLdaResult;
+    const selectedTheme = colorTheme.value;
+    const isDarkTheme = selectedTheme === 'aurora-dark' || selectedTheme === 'monochrome-dark';
+
+    let cardsHtml = topicsData.map(topic => {
+        const sharePct = (topic.share * 100).toFixed(1);
+        const color = isDarkTheme ? topic.darkColor : topic.lightColor;
+
+        const maxProbInTopic = topic.topWords.length > 0 ? topic.topWords[0].prob : 1;
+
+        const wordsRows = topic.topWords.map((wItem, idx) => {
+            const relBarWidth = Math.max(10, Math.min(100, Math.round((wItem.prob / maxProbInTopic) * 100)));
+            const probPct = (wItem.prob * 100).toFixed(1);
+
+            return `
+                <div class="lda-word-row" onclick="openWordTopicDetail('${wItem.word}')" title="クリックでこの単語のソフトクラスタリング割合（トピック分布）を表示">
+                    <div class="lda-word-name">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); width: 16px;">${idx + 1}.</span>
+                        <span>${wItem.word}</span>
+                    </div>
+                    <div class="lda-word-bar-container">
+                        <div class="lda-word-bar" style="background: ${color}; width: ${relBarWidth}%;"></div>
+                        <div class="lda-word-pct">${probPct}%</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="lda-topic-card">
+                <div class="lda-topic-header">
+                    <div class="lda-topic-name">
+                        <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: ${color};"></span>
+                        ${topic.label}
+                    </div>
+                    <div class="lda-topic-badge" style="background: ${color}20; color: ${color};">
+                        構成比 ${sharePct}%
+                    </div>
+                </div>
+                <div class="lda-word-list">
+                    ${wordsRows || '<div style="font-size:12px; color:var(--text-muted); padding:8px;">該当単語なし</div>'}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    ldaContainer.innerHTML = `
+        <div class="lda-header-card">
+            <div>
+                <div class="lda-header-title">🧠 潜在話題の自動分類結果 （判定トピック数: ${k} 個）</div>
+                <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                    Perplexity（モデル適合度）に基づき最適なトピック数を自動決定しました。単語をクリックすると、各トピックへの所属割合（ソフトクラスタリング）を確認できます。
+                </div>
+            </div>
+        </div>
+        <div class="lda-grid">
+            ${cardsHtml}
+        </div>
+    `;
+}
+
+// Open Word Soft-Clustering Detail & KWIC Entry
+function openWordTopicDetail(word) {
+    if (!currentLdaResult || !currentLdaResult.wordTopics[word]) {
+        const count = wordFrequencies.find(item => item.text === word)?.count || 1;
+        openKWICModal(word, count);
+        return;
+    }
+    const tInfo = currentLdaResult.wordTopics[word];
+    const isDarkTheme = colorTheme.value === 'aurora-dark' || colorTheme.value === 'monochrome-dark';
+
+    let distHtml = tInfo.topicDist.map(td => {
+        const pct = (td.prob * 100).toFixed(1);
+        const color = isDarkTheme ? td.darkColor : td.lightColor;
+        return `
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 13px;">
+                <div style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text-primary);">
+                    <span style="width: 10px; height: 10px; border-radius: 50%; background: ${color};"></span>
+                    ${td.label}
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; width: 140px;">
+                    <div style="flex-grow: 1; height: 8px; border-radius: 4px; background: var(--border-color); overflow: hidden;">
+                        <div style="height: 100%; width: ${pct}%; background: ${color}; font-size: 0;"></div>
+                    </div>
+                    <span style="font-size: 12px; font-family: monospace; color: var(--text-muted); width: 38px; text-align: right;">${pct}%</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    const count = wordFrequencies.find(item => item.text === word)?.count || 1;
+
+    const extraHeaderHtml = `
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 11px; font-weight: 700; color: var(--accent-blue); margin-bottom: 8px;">📊 単語「${word}」のトピック混合分布 (ソフトクラスタリング):</div>
+            <div style="background: var(--bg-body); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 16px;">
+                ${distHtml}
+            </div>
+        </div>
+    `;
+
+    openKWICModal(word, count, extraHeaderHtml);
+}
+
+// Get color schemes (supports topic-lda)
+function getColorScheme(theme, isDarkTheme = false) {
+    if (theme === 'topic-lda' && currentLdaResult) {
+        return function(itemOrIndex) {
+            let word = '';
+            if (typeof itemOrIndex === 'string') {
+                word = itemOrIndex;
+            } else if (Array.isArray(itemOrIndex)) {
+                word = itemOrIndex[0];
+            } else if (itemOrIndex && typeof itemOrIndex === 'object' && itemOrIndex.text) {
+                word = itemOrIndex.text;
+            }
+            
+            if (word && currentLdaResult.wordTopics[word]) {
+                const topicInfo = currentLdaResult.wordTopics[word];
+                return isDarkTheme ? topicInfo.darkColor : topicInfo.lightColor;
+            }
+            
+            const palette = isDarkTheme ? currentLdaResult.darkPalette : currentLdaResult.lightPalette;
+            const idx = typeof itemOrIndex === 'number' ? itemOrIndex : Math.floor(Math.random() * palette.length);
+            return palette[idx % palette.length];
+        };
+    }
+
     const themes = {
         'aurora-light': ['#1D4ED8', '#6D28D9', '#BE185D', '#0F766E', '#4338CA', '#B91C1C'],
         'cool-light': ['#0891B2', '#0284C7', '#1D4ED8', '#2563EB', '#059669', '#0369A1'],
@@ -1652,12 +2088,12 @@ function drawBarChartOnCanvas(canvas, list, rankingMethod, selectedTheme, select
     const barHeight = Math.max(12 * scaleFactor, Math.min(24 * scaleFactor, rowHeight * 0.6));
     
     const barWidthArea = canvas.width - leftMargin - rightMargin;
-    const colorGenerator = getColorScheme(selectedTheme);
+    const colorGenerator = getColorScheme(selectedTheme, isDarkTheme);
     
     list.forEach((item, index) => {
         const val = getValue(item);
         const barWidth = maxVal > 0 ? (val / maxVal) * barWidthArea : 0;
-        const color = colorGenerator(index);
+        const color = colorGenerator(item.text || index);
         
         const y = topMargin + index * rowHeight;
         
@@ -1684,7 +2120,17 @@ function drawBarChartOnCanvas(canvas, list, rankingMethod, selectedTheme, select
 }
 
 // Helper to get qualitative high-contrast community colors (KH Coder style)
-function getNetworkNodeColor(theme, index, isDarkTheme) {
+function getNetworkNodeColor(theme, indexOrNode, isDarkTheme) {
+    if (theme === 'topic-lda' && currentLdaResult) {
+        let word = typeof indexOrNode === 'string' ? indexOrNode : (indexOrNode?.id || indexOrNode?.word || indexOrNode?.text || '');
+        if (word && currentLdaResult.wordTopics[word]) {
+            const topicInfo = currentLdaResult.wordTopics[word];
+            return isDarkTheme ? topicInfo.darkColor : topicInfo.lightColor;
+        }
+    }
+
+    const index = typeof indexOrNode === 'number' ? indexOrNode : (indexOrNode?.communityIndex ?? indexOrNode?.cluster ?? 0);
+
     if (theme === 'pure-bw') {
         // Use dark gray so nodes are visible on white background
         return '#333333';
@@ -2193,7 +2639,7 @@ function updateWordCloud() {
             gridSize: Math.round(16 * cloudCanvas.width / 1024),
             weightFactor: 1,
             fontFamily: selectedFont,
-            color: getColorScheme(selectedTheme),
+            color: getColorScheme(selectedTheme, isDarkTheme),
             rotateRatio: isRotate ? 0.35 : 0,
             rotationSteps: 2,
             backgroundColor: 'transparent',
@@ -2214,7 +2660,12 @@ function updateWordCloud() {
                 tooltip.style.top = `${event.clientY - canvasContainer.getBoundingClientRect().top + 15}px`;
                 
                 const tfidfFormatted = tfidf.toFixed(2);
-                tooltip.innerHTML = `<strong>${word}</strong><br>出現回数: ${count}回<br>特徴度 (TF-IDF): ${tfidfFormatted}<br><small style="color: var(--text-muted)">ダブルクリックで除外</small>`;
+                let topicHtml = '';
+                if (selectedTheme === 'topic-lda' && currentLdaResult && currentLdaResult.wordTopics[word]) {
+                    const tInfo = currentLdaResult.wordTopics[word];
+                    topicHtml = `<br><span style="color: var(--accent-blue); font-weight: 600;">所属トピック: ${tInfo.label} (${(tInfo.prob * 100).toFixed(0)}%)</span>`;
+                }
+                tooltip.innerHTML = `<strong>${word}</strong><br>出現回数: ${count}回<br>特徴度 (TF-IDF): ${tfidfFormatted}${topicHtml}<br><small style="color: var(--text-muted)">ダブルクリックで除外</small>`;
             },
             click: function(item) {
                 if (displayType.value !== 'cloud') return;
@@ -2554,12 +3005,21 @@ const kwicWordTitle = document.getElementById('kwic-word-title');
 const kwicWordCount = document.getElementById('kwic-word-count');
 const kwicTbody = document.getElementById('kwic-tbody');
 const kwicLimitWarning = document.getElementById('kwic-limit-warning');
+const kwicExtraHeader = document.getElementById('kwic-extra-header');
 
-function openKWICModal(word, count) {
+function openKWICModal(word, count, extraHeaderHtml = null) {
     if (!word) return;
     kwicWordTitle.textContent = word;
     kwicWordCount.textContent = count || "-";
     
+    if (extraHeaderHtml && kwicExtraHeader) {
+        kwicExtraHeader.style.display = 'block';
+        kwicExtraHeader.innerHTML = extraHeaderHtml;
+    } else if (kwicExtraHeader) {
+        kwicExtraHeader.style.display = 'none';
+        kwicExtraHeader.innerHTML = '';
+    }
+
     kwicTbody.innerHTML = '';
     
     let matchCount = 0;

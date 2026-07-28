@@ -102,6 +102,7 @@
                     <option value="chart">横棒グラフ (上位語リスト)</option>
                     <option value="network">共起ネットワーク</option>
                     <option value="pca">多変量解析 (PCA散布図)</option>
+                    <option value="topic-lda">トピック分析 (LDAモデル・潜在話題)</option>
                 </select>
 
                 <div id="method-description" class="method-description" style="margin-top: 8px; margin-bottom: 8px;">
@@ -223,6 +224,7 @@
             <div class="canvas-container" id="canvas-container">
                 <canvas id="cloud-canvas"></canvas>
                 <div id="chart-container" class="chart-container" style="display: none;"></div>
+                <div id="lda-container" class="lda-container" style="display: none; padding: 24px; height: 100%; box-sizing: border-box; overflow-y: auto;"></div>
                 <div class="empty-state" id="empty-state">
                     <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                     <h2>データを読み込むと分析が始まります</h2>
@@ -266,6 +268,7 @@
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
             </header>
+            <div id="kwic-extra-header" style="padding: 12px 24px 0 24px; display: none;"></div>
             <div class="kwic-table-container">
                 <table class="kwic-table">
                     <thead>
@@ -315,6 +318,6 @@
         </div>
     </div>
 
-    <script src="js/app.js?v=1.5"></script>
+    <script src="js/app.js?v=1.7"></script>
 </body>
 </html>
