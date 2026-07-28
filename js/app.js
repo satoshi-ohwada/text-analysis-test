@@ -74,6 +74,7 @@ const resetStopwordsBtn = document.getElementById('reset-stopwords-btn');
 const exportWordsCsvBtn = document.getElementById('export-words-csv-btn');
 const exportPairsCsvBtn = document.getElementById('export-pairs-csv-btn');
 const relayoutBtn = document.getElementById('relayout-btn');
+const sidebarRelayoutBtn = document.getElementById('sidebar-relayout-btn');
 let isForceRelayout = false;
 
 // Input switcher Elements
@@ -2121,6 +2122,7 @@ function updateWordCloud() {
         exportWordsCsvBtn.disabled = true;
         exportPairsCsvBtn.disabled = true;
         if (relayoutBtn) relayoutBtn.disabled = true;
+        if (sidebarRelayoutBtn) sidebarRelayoutBtn.disabled = true;
         return;
     }
 
@@ -2129,6 +2131,7 @@ function updateWordCloud() {
     exportWordsCsvBtn.disabled = false;
     exportPairsCsvBtn.disabled = false;
     if (relayoutBtn) relayoutBtn.disabled = false;
+    if (sidebarRelayoutBtn) sidebarRelayoutBtn.disabled = false;
 
     const minCount = parseInt(minCountRange.value);
     const maxWords = parseInt(maxWordsRange.value);
@@ -2154,6 +2157,7 @@ function updateWordCloud() {
         exportWordsCsvBtn.disabled = true;
         exportPairsCsvBtn.disabled = true;
         if (relayoutBtn) relayoutBtn.disabled = true;
+        if (sidebarRelayoutBtn) sidebarRelayoutBtn.disabled = true;
         return;
     }
 
@@ -2516,16 +2520,21 @@ downloadBtn.addEventListener('click', () => {
     }
 });
 
+function triggerRelayout() {
+    if (wordFrequencies.length === 0) return;
+    isForceRelayout = true;
+    if (displayType.value === 'pca') {
+        if (rawTextData) processAndRender();
+    } else {
+        updateWordCloud();
+    }
+}
+
 if (relayoutBtn) {
-    relayoutBtn.addEventListener('click', () => {
-        if (wordFrequencies.length === 0) return;
-        isForceRelayout = true;
-        if (displayType.value === 'pca') {
-            if (rawTextData) processAndRender();
-        } else {
-            updateWordCloud();
-        }
-    });
+    relayoutBtn.addEventListener('click', triggerRelayout);
+}
+if (sidebarRelayoutBtn) {
+    sidebarRelayoutBtn.addEventListener('click', triggerRelayout);
 }
 
 // Run Initialization on Load
