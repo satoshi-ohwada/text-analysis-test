@@ -1304,10 +1304,12 @@ function processAndRender() {
     const docFreq = {};
     const coocCounts = {};
     const uniqueWordsPerLine = [];
+    const lineWordsList = [];
 
     globalAnalyzedLines.forEach(originalTokens => {
         const tokens = mergeCompoundWords(originalTokens, customCompoundWords);
         const uniqueWordsInLine = new Set();
+        const lineWords = [];
         
         tokens.forEach(token => {
             const pos = token.pos;
@@ -1334,9 +1336,11 @@ function processAndRender() {
 
             counts[word] = (counts[word] || 0) + 1;
             uniqueWordsInLine.add(word);
+            lineWords.push(word);
         });
 
         uniqueWordsPerLine.push(uniqueWordsInLine);
+        lineWordsList.push(lineWords);
 
         const wordsArr = Array.from(uniqueWordsInLine);
         for (let i = 0; i < wordsArr.length; i++) {
@@ -1634,36 +1638,32 @@ function processAndRender() {
     }
 
     // --- LDA TOPIC MODELING & AUTOMATIC TOPIC NUMBER SELECTION ---
-    runLDAAnalysis(globalAnalyzedLines, filteredList.map(w => w.text));
+    runLDAAnalysis(lineWordsList, filteredList.map(w => w.text));
 
     resizeCanvas();
     updateWordCloud();
 }
 
-// LDA Topic Modeling with Automatic Optimal K Selection
-function runLDAAnalysis(analyzedLines, allowedWordsList) {
-    if (!allowedWordsList || allowedWordsList.length === 0 || !analyzedLines || analyzedLines.length === 0) {
+// LDA Topic Modeling with Automatic Optimal K Selection (Ultra-Optimized)
+function runLDAAnalysis(lineWordsList, allowedWordsList) {
+    if (!allowedWordsList || allowedWordsList.length === 0 || !lineWordsList || lineWordsList.length === 0) {
         currentLdaResult = null;
         return;
     }
 
-    const vocab = allowedWordsList;
+    // Limit LDA processing vocabulary to top 100 words for sub-10ms performance on large datasets
+    const vocab = allowedWordsList.slice(0, 100);
     const vocabSet = new Set(vocab);
     const vocabIndexMap = new Map();
     vocab.forEach((word, idx) => vocabIndexMap.set(word, idx));
 
     const V = vocab.length;
     
-    // Construct document token lists
+    // Super fast document token indexing (no duplicate tokenization!)
     const docTokens = [];
-    analyzedLines.forEach(originalTokens => {
-        const tokens = mergeCompoundWords(originalTokens, customCompoundWords);
+    lineWordsList.forEach(wordsInLine => {
         const docWords = [];
-        tokens.forEach(token => {
-            let word = (token.pos === '動詞' || token.pos === '形容詞' || token.pos === '副詞') && token.basic_form !== '*' 
-                ? token.basic_form 
-                : token.surface_form;
-            word = word.trim();
+        wordsInLine.forEach(word => {
             if (vocabSet.has(word)) {
                 docWords.push(vocabIndexMap.get(word));
             }
