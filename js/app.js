@@ -461,10 +461,48 @@ function showCSVColumnModal(fileName, rows) {
     const colCount = rows.length > 0 ? Math.max(...rows.map(r => r.length)) : 0;
     if (colCount === 0) return;
 
+    function findBestTextColumn() {
+        let bestColIdx = 0;
+        let maxScore = -1;
+        const hasHeader = csvHasHeaderCheck ? csvHasHeaderCheck.checked : true;
+        const startRow = hasHeader ? 1 : 0;
+
+        for (let colIdx = 0; colIdx < colCount; colIdx++) {
+            let score = 0;
+            let headerName = "";
+            if (hasHeader && rows[0] && rows[0][colIdx]) {
+                headerName = rows[0][colIdx].trim();
+            }
+
+            if (/理由|詳細|記述|コメント|内容|意見|テキスト|本文|回答|アンケート|自由|備考/i.test(headerName)) {
+                score += 2000;
+            }
+
+            let totalLen = 0;
+            let count = 0;
+            for (let r = startRow; r < Math.min(startRow + 20, rows.length); r++) {
+                if (rows[r] && rows[r][colIdx]) {
+                    const str = rows[r][colIdx].trim();
+                    totalLen += str.length;
+                    count++;
+                }
+            }
+            const avgLen = count > 0 ? (totalLen / count) : 0;
+            score += avgLen * 10;
+
+            if (score > maxScore) {
+                maxScore = score;
+                bestColIdx = colIdx;
+            }
+        }
+        return bestColIdx;
+    }
+
     function populateOptions() {
         csvColumnSelect.innerHTML = '';
         const hasHeader = csvHasHeaderCheck ? csvHasHeaderCheck.checked : true;
         const startRow = hasHeader ? 1 : 0;
+        const bestColIdx = findBestTextColumn();
 
         for (let colIdx = 0; colIdx < colCount; colIdx++) {
             let headerName = "";
@@ -483,6 +521,7 @@ function showCSVColumnModal(fileName, rows) {
 
             const option = document.createElement('option');
             option.value = colIdx;
+            if (colIdx === bestColIdx) option.selected = true;
 
             const shortSample = sampleVal.length > 25 ? sampleVal.substring(0, 25) + "..." : sampleVal;
             if (hasHeader && headerName) {
@@ -492,6 +531,7 @@ function showCSVColumnModal(fileName, rows) {
             }
             csvColumnSelect.appendChild(option);
         }
+        csvColumnSelect.value = bestColIdx;
         updatePreview();
     }
 
