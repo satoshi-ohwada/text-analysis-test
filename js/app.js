@@ -3129,20 +3129,32 @@ function renderAnalysisSummary(mode, filteredList) {
         dataNote = `<span style="color:var(--text-muted);">💡 ${lines}件のデータです。件数が増えるほど安定した結果が得られます。</span>`;
     }
 
+    const rankingMethod = document.getElementById('ranking-method') ? document.getElementById('ranking-method').value : 'count';
+    const isTfidf = rankingMethod === 'tfidf';
+
     let commentHtml = '';
     let nextHtml = '';
 
     if (mode === 'cloud') {
         // ① ワードクラウド用コメント
         if (top1) {
-            const topWords = filteredList.slice(0, 3).map(w => `「${w.text}」(${w.count}回)`).join('、');
-            commentHtml = `
-                <b>📊 この結果から読み取れること：</b><br>
-                最も多く出現した語は <b>「${top1.text}」（${top1.count}回）</b> です。
-                ${top2 ? `次いで「${top2.text}」（${top2.count}回）` : ''}${top3 ? `、「${top3.text}」（${top3.count}回）` : ''}が続きます。<br>
-                全体で <b>${uniqueW}種類</b> の語が使われており、${lines}件の回答から抽出しました。<br>
-                語の大きさは出現回数に比例します。大きい語が回答全体のキーワードです。
-                ${filteredList.length > 10 ? `<br><span style="color:var(--text-muted);">💡 ヒント：「特徴度(TF-IDF)順」に切り替えると、この回答集に特有の語が大きく表示されます。</span>` : ''}`;
+            if (isTfidf) {
+                commentHtml = `
+                    <b>📊 この結果から読み取れること：</b><br>
+                    最も<b>特徴度が高い語</b>は <b>「${top1.text}」</b> です。
+                    ${top2 ? `次いで「${top2.text}」` : ''}${top3 ? `、「${top3.text}」` : ''}が続きます。<br>
+                    全体で <b>${uniqueW}種類</b> の語が使われており、${lines}件の回答から抽出しました。<br>
+                    語の大きさは特徴度（TF-IDF）に比例します。大きい語は、一般的な文章ではあまり使われないが、<b>この回答集には特有に登場する重要なキーワード</b>です。
+                    <br><span style="color:var(--text-muted);">💡 ヒント：「頻出度順」に戻すと、単純に一番多く出現した語が大きく表示されます。</span>`;
+            } else {
+                commentHtml = `
+                    <b>📊 この結果から読み取れること：</b><br>
+                    最も多く出現した語は <b>「${top1.text}」（${top1.count}回）</b> です。
+                    ${top2 ? `次いで「${top2.text}」（${top2.count}回）` : ''}${top3 ? `、「${top3.text}」（${top3.count}回）` : ''}が続きます。<br>
+                    全体で <b>${uniqueW}種類</b> の語が使われており、${lines}件の回答から抽出しました。<br>
+                    語の大きさは出現回数に比例します。大きい語が回答全体のキーワードです。
+                    ${filteredList.length > 10 ? `<br><span style="color:var(--text-muted);">💡 ヒント：「特徴度(TF-IDF)順」に切り替えると、この回答集に特有の語が大きく表示されます。</span>` : ''}`;
+            }
         }
         // ③ 次のステップ
         nextHtml = `
@@ -3156,11 +3168,19 @@ function renderAnalysisSummary(mode, filteredList) {
     } else if (mode === 'chart') {
         // ① 棒グラフ用コメント
         if (top1) {
-            commentHtml = `
-                <b>📊 この結果から読み取れること：</b><br>
-                最頻出語は <b>「${top1.text}」（${top1.count}回）</b> です。
-                上位語を見ることで、回答者の関心が集中しているテーマが分かります。<br>
-                <span style="color:var(--text-muted);">💡 「特徴度(TF-IDF)順」に切り替えると、単なる高頻度語ではなく<b>この回答集ならではの特徴語</b>が上位に来ます。他のデータと比較したいときに有効です。</span>`;
+            if (isTfidf) {
+                commentHtml = `
+                    <b>📊 この結果から読み取れること：</b><br>
+                    最も<b>特徴度が高い語</b>は <b>「${top1.text}」</b> です。
+                    上位語を見ることで、単なる頻出語ではなく<b>この回答集ならではの特徴的なテーマ</b>が分かります。<br>
+                    <span style="color:var(--text-muted);">💡 「頻出度順」に戻すと、単純に出現回数が多い順のランキングになります。</span>`;
+            } else {
+                commentHtml = `
+                    <b>📊 この結果から読み取れること：</b><br>
+                    最頻出語は <b>「${top1.text}」（${top1.count}回）</b> です。
+                    上位語を見ることで、回答者の関心が集中しているテーマが分かります。<br>
+                    <span style="color:var(--text-muted);">💡 「特徴度(TF-IDF)順」に切り替えると、単なる高頻度語ではなく<b>この回答集ならではの特徴語</b>が上位に来ます。他のデータと比較したいときに有効です。</span>`;
+            }
         }
         // ③ 次のステップ
         nextHtml = `
@@ -3262,6 +3282,12 @@ function toggleAnalysisSummary() {
     const isOpen = panel.style.display !== 'none';
     panel.style.display = isOpen ? 'none' : 'block';
     if (arrow) arrow.textContent = isOpen ? '▶' : '▼';
+    
+    // パネル開閉によってキャンバスの領域が変わるため、リサイズを発火して再描画
+    if (typeof rawTextData !== 'undefined' && rawTextData) {
+        // setTimeoutで少し遅らせてDOM更新後にリサイズを確実に処理
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+    }
 }
 
 // 6. Download Word Cloud, Bar Chart, Network Diagram, or PCA Scatter Plot as Image
