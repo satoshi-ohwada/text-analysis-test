@@ -839,12 +839,15 @@ if (clusterCount) {
 }
 
 // LDA topic count: toggle manual input and re-render
-const ldaTopicModeSelect = document.getElementById('lda-topic-mode');
+const ldaTopicRadios = document.querySelectorAll('input[name="lda-topic-mode"]');
 const ldaTopicCountInput = document.getElementById('lda-topic-count');
-if (ldaTopicModeSelect && ldaTopicCountInput) {
-    ldaTopicModeSelect.addEventListener('change', () => {
-        ldaTopicCountInput.style.display = ldaTopicModeSelect.value === 'manual' ? 'block' : 'none';
-        if (rawTextData) processAndRender();
+if (ldaTopicRadios.length > 0 && ldaTopicCountInput) {
+    ldaTopicRadios.forEach(radio => {
+        radio.addEventListener('change', () => {
+            const isManual = document.querySelector('input[name="lda-topic-mode"]:checked').value === 'manual';
+            ldaTopicCountInput.disabled = !isManual;
+            if (rawTextData) processAndRender();
+        });
     });
     ldaTopicCountInput.addEventListener('change', () => {
         if (rawTextData) processAndRender();
@@ -1892,9 +1895,9 @@ function runLDAAnalysis(lineWordsList, allowedWordsList) {
     const D = docTokens.length;
 
     // Check if user manually specified topic count
-    const ldaTopicModeEl = document.getElementById('lda-topic-mode');
+    const modeRadio = document.querySelector('input[name="lda-topic-mode"]:checked');
+    const isManualK = modeRadio && modeRadio.value === 'manual';
     const ldaTopicCountEl = document.getElementById('lda-topic-count');
-    const isManualK = ldaTopicModeEl && ldaTopicModeEl.value === 'manual';
     const manualK = ldaTopicCountEl ? parseInt(ldaTopicCountEl.value) : 3;
 
     let bestK;
@@ -3203,8 +3206,8 @@ function renderAnalysisSummary(mode, filteredList) {
         // ① LDA用コメント
         if (currentLdaResult) {
             const k = currentLdaResult.topics ? currentLdaResult.topics.length : '?';
-            const ldaTopicModeEl = document.getElementById('lda-topic-mode');
-            const isManual = ldaTopicModeEl && ldaTopicModeEl.value === 'manual';
+            const modeRadio = document.querySelector('input[name="lda-topic-mode"]:checked');
+            const isManual = modeRadio && modeRadio.value === 'manual';
             commentHtml = `
                 <b>📊 この結果から読み取れること：</b><br>
                 ${lines}件の回答から <b>${k}つのトピック（潜在的テーマ）</b> が抽出されました
@@ -3218,17 +3221,47 @@ function renderAnalysisSummary(mode, filteredList) {
             共起ネットワークで見たグループと照らし合わせると、テーマの解釈が深まります。`;
     }
 
-    // パネルを組み立てて表示
+    // パネルを組み立てて表示（折りたたみバー）
+    const bar = document.getElementById('analysis-summary-bar');
+    const toggle = document.getElementById('analysis-summary-toggle');
     const parts = [dataNote, commentHtml, nextHtml].filter(p => p);
-    if (parts.length === 0) {
-        panel.style.display = 'none';
+    if (parts.length === 0 || !bar) {
+        if (bar) bar.style.display = 'none';
         return;
     }
 
     panel.innerHTML = parts.map((p, i) =>
         `<div style="${i < parts.length - 1 ? 'margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border-color);' : ''}">${p}</div>`
     ).join('');
-    panel.style.display = 'block';
+
+    // データ警告があればバッジをトグルボタンに付ける
+    let badgeHtml = '';
+    if (lines < 5) {
+        badgeHtml = `<span style="margin-left:6px;background:#EF4444;color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;">⚠️ データ不足</span>`;
+    } else if (lines < 15) {
+        badgeHtml = `<span style="margin-left:6px;background:#F59E0B;color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;">⚠️ データ少</span>`;
+    }
+    if (toggle) {
+        toggle.innerHTML = `<span id="analysis-summary-arrow">▶</span><span>📊 分析サマリーを見る（読み方・次のステップ）</span>${badgeHtml}`;
+    }
+
+    bar.style.display = 'block';
+    // 内容はデフォルト非表示のまま（折りたたみ状態を維持）
+    // ※警告がある場合は自動展開
+    if (lines < 15 && panel.style.display === 'none') {
+        panel.style.display = 'block';
+        const arrow = document.getElementById('analysis-summary-arrow');
+        if (arrow) arrow.textContent = '▼';
+    }
+}
+
+function toggleAnalysisSummary() {
+    const panel = document.getElementById('analysis-summary');
+    const arrow = document.getElementById('analysis-summary-arrow');
+    if (!panel) return;
+    const isOpen = panel.style.display !== 'none';
+    panel.style.display = isOpen ? 'none' : 'block';
+    if (arrow) arrow.textContent = isOpen ? '▶' : '▼';
 }
 
 // 6. Download Word Cloud, Bar Chart, Network Diagram, or PCA Scatter Plot as Image

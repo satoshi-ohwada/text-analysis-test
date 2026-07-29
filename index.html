@@ -123,13 +123,17 @@
                     <input type="number" id="cluster-count" min="2" max="8" value="3" class="select-control" style="width: 100%; box-sizing: border-box;">
                 </div>
 
-                <div id="lda-topic-count-group" style="display: none; margin-top: 10px; margin-bottom: 10px;">
-                    <label for="lda-topic-mode">トピック数 (LDA):</label>
-                    <select id="lda-topic-mode" class="select-control" style="width: 100%; margin-bottom: 6px;">
-                        <option value="auto">自動（パープレキシティで最適化）</option>
-                        <option value="manual">手動で指定</option>
-                    </select>
-                    <input type="number" id="lda-topic-count" min="2" max="10" value="3" class="select-control" style="width: 100%; box-sizing: border-box; display: none;">
+                <div id="lda-topic-count-group" style="display: none; margin-top: 10px; margin-bottom: 10px; padding: 12px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px;">
+                    <div style="font-weight: 600; margin-bottom: 8px; color: var(--text-primary); font-size: 13px;">トピック数 (LDA):</div>
+                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; cursor: pointer;">
+                        <input type="radio" name="lda-topic-mode" value="auto" checked style="accent-color: var(--accent-blue);">
+                        <span>自動（最適数を探索）</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                        <input type="radio" name="lda-topic-mode" value="manual" style="accent-color: var(--accent-blue);">
+                        <span>手動指定:</span>
+                        <input type="number" id="lda-topic-count" min="2" max="10" value="3" class="select-control" style="width: 70px; padding: 4px; height: 28px;" disabled>
+                    </label>
                 </div>
 
 
@@ -267,8 +271,19 @@
                 <div class="tooltip" id="tooltip"></div>
             </div>
 
-            <!-- Analysis Summary Panel -->
-            <div id="analysis-summary" style="display:none; padding: 10px 18px; background: var(--bg-surface); border-top: 1px solid var(--border-color); font-size: 12.5px; line-height: 1.7; color: var(--text-secondary);"></div>
+            <!-- Analysis Summary Panel (collapsible) -->
+            <div id="analysis-summary-bar" style="display:none; border-top: 1px solid var(--border-color);">
+                <button id="analysis-summary-toggle" onclick="toggleAnalysisSummary()" style="
+                    width:100%; padding: 5px 14px; background: var(--bg-surface);
+                    border:none; border-bottom: 1px solid transparent;
+                    color: var(--accent-blue); font-size: 12px; font-weight:600;
+                    cursor:pointer; text-align:left; display:flex; align-items:center; gap:6px;
+                    transition: background 0.15s;">
+                    <span id="analysis-summary-arrow">▶</span>
+                    <span>📊 分析サマリーを見る（読み方・次のステップ）</span>
+                </button>
+                <div id="analysis-summary" style="display:none; padding: 10px 18px; background: var(--bg-surface); font-size: 12.5px; line-height: 1.7; color: var(--text-secondary);"></div>
+            </div>
 
             <!-- Simple stats bar -->
             <footer class="stats-bar" id="stats-bar">
