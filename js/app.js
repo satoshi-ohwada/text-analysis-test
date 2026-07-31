@@ -19,6 +19,7 @@ let customStopWords = new Set();
 let networkNodes = [];
 let networkEdges = [];
 let networkAnimationFrameId = null;
+let kwicNetworkAnimationFrameId = null;
 
 // PCA Scatter Plot State
 let pcaPoints = [];
@@ -2873,6 +2874,10 @@ function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThem
 
 // 5. Draw Word Cloud, Canvas Bar Chart, Co-occurrence Network, or PCA Scatter Plot
 function updateWordCloud() {
+    if (typeof tooltip !== 'undefined' && tooltip) {
+        tooltip.style.display = 'none';
+    }
+
     if (networkAnimationFrameId) {
         cancelAnimationFrame(networkAnimationFrameId);
         networkAnimationFrameId = null;
@@ -3403,8 +3408,11 @@ downloadBtn.addEventListener('click', async () => {
                     types: [{ description: 'PNG Image', accept: {'image/png': ['.png']} }]
                 });
             } catch (err) {
-                if (err.name !== 'AbortError') console.error("SavePicker error:", err);
-                return;
+                if (err.name === 'AbortError') {
+                    return;
+                }
+                console.error("SavePicker error:", err);
+                // Continue without fileHandle to use the fallback download method
             }
         }
         
@@ -3703,6 +3711,10 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
     let matchCount = 0;
     const maxDisplay = 1000;
     
+    // Variables for KWIC Mini Network
+    const kwicCoocCounts = {};
+    const matchingSentences = [];
+    
     for (let i = 0; i < globalAnalyzedLines.length; i++) {
         // Merge compound words just like we do in processAndRender
         const originalTokens = globalAnalyzedLines[i];
@@ -3724,6 +3736,23 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
             if (wordStr.trim() === word) {
                 wordIndices.push(j);
             }
+        }
+        
+        if (wordIndices.length > 0) {
+            matchingSentences.push(tokens);
+            // Count local co-occurrences for ego network
+            const uniqueWordsInSentence = new Set();
+            tokens.forEach(t => {
+                const p = t.pos;
+                let tStr = (p === '動詞' || p === '形容詞' || p === '副詞') && t.basic_form !== '*' ? t.basic_form : t.surface_form;
+                // Exclude the target word itself, stopwords, and punctuation
+                if (allowedPOS.includes(p) && tStr !== word && !customStopWords.has(tStr) && !defaultStopWordsSet.has(tStr) && !/[!-/:-@[-`{-~、。，．・]/.test(tStr)) {
+                    uniqueWordsInSentence.add(tStr);
+                }
+            });
+            uniqueWordsInSentence.forEach(w => {
+                kwicCoocCounts[w] = (kwicCoocCounts[w] || 0) + 1;
+            });
         }
         
         for (const wordIndex of wordIndices) {
@@ -3795,11 +3824,178 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
         kwicLimitWarning.style.display = 'inline-block';
     }
     
+    // BUILD MINI NETWORK
+    if (kwicNetworkAnimationFrameId) {
+        cancelAnimationFrame(kwicNetworkAnimationFrameId);
+        kwicNetworkAnimationFrameId = null;
+    }
+    
+    const kwicNetworkCanvas = document.getElementById('kwic-network-canvas');
+    if (kwicNetworkCanvas && matchingSentences.length > 0) {
+        // Find top co-occurring words (e.g. top 15)
+        const sortedCooc = Object.keys(kwicCoocCounts).sort((a, b) => kwicCoocCounts[b] - kwicCoocCounts[a]).slice(0, 15);
+        if (sortedCooc.length > 0) {
+            const canvasContainer = kwicNetworkCanvas.parentElement;
+            canvasContainer.style.display = 'flex';
+            kwicNetworkCanvas.width = canvasContainer.clientWidth || 520;
+            kwicNetworkCanvas.height = canvasContainer.clientHeight || 250;
+            
+            const selectedTheme = document.getElementById('color-theme') ? document.getElementById('color-theme').value : 'default';
+            const isDarkTheme = document.documentElement.getAttribute('data-theme') === 'dark';
+            const selectedFont = document.getElementById('font-family') ? document.getElementById('font-family').value : 'sans-serif';
+            
+            // Build Nodes
+            let miniNodes = [{
+                id: word,
+                count: matchingSentences.length,
+                community: 'Center',
+                communityLabel: 'Target Word',
+                x: kwicNetworkCanvas.width / 2,
+                y: kwicNetworkCanvas.height / 2,
+                vx: 0, vy: 0,
+                radius: 18,
+                isCenter: true
+            }];
+            
+            const maxCooc = kwicCoocCounts[sortedCooc[0]];
+            const minCooc = kwicCoocCounts[sortedCooc[sortedCooc.length - 1]] || 1;
+            
+            sortedCooc.forEach(w => {
+                let r = 8;
+                if (maxCooc !== minCooc) {
+                    r = 6 + ((kwicCoocCounts[w] - minCooc) / (maxCooc - minCooc)) * 6;
+                }
+                miniNodes.push({
+                    id: w,
+                    count: kwicCoocCounts[w],
+                    community: 'Neighbor',
+                    communityLabel: 'Co-occurring Word',
+                    x: kwicNetworkCanvas.width / 2 + (Math.random() - 0.5) * 100,
+                    y: kwicNetworkCanvas.height / 2 + (Math.random() - 0.5) * 100,
+                    vx: 0, vy: 0,
+                    radius: r
+                });
+            });
+            
+            // Build Edges
+            let miniEdges = [];
+            const nodeIds = new Set(miniNodes.map(n => n.id));
+            
+            // Connect target word to others based on global cooc Counts in these sentences
+            sortedCooc.forEach(w => {
+                const tgtNode = miniNodes.find(n => n.id === w);
+                miniEdges.push({ source: miniNodes[0], target: tgtNode, weight: kwicCoocCounts[w] / matchingSentences.length });
+            });
+            
+            // Connect neighbors to each other if they co-occur together in matching sentences
+            for (let i = 0; i < sortedCooc.length; i++) {
+                for (let j = i + 1; j < sortedCooc.length; j++) {
+                    const w1 = sortedCooc[i];
+                    const w2 = sortedCooc[j];
+                    let pairCooc = 0;
+                    matchingSentences.forEach(sentenceTokens => {
+                        const sWords = sentenceTokens.map(t => {
+                            const p = t.pos;
+                            return (p === '動詞' || p === '形容詞' || p === '副詞') && t.basic_form !== '*' ? t.basic_form : t.surface_form;
+                        });
+                        if (sWords.includes(w1) && sWords.includes(w2)) pairCooc++;
+                    });
+                    if (pairCooc > 0) {
+                        const srcNode = miniNodes.find(n => n.id === w1);
+                        const tgtNode = miniNodes.find(n => n.id === w2);
+                        miniEdges.push({ source: srcNode, target: tgtNode, weight: pairCooc / matchingSentences.length });
+                    }
+                }
+            }
+            
+            // Physics simulation loop
+            function renderMiniNetwork() {
+                // Apply simple force-directed layout
+                const k = Math.sqrt((kwicNetworkCanvas.width * kwicNetworkCanvas.height) / miniNodes.length);
+                const repulsion = 1500;
+                
+                // Repulsion
+                for (let i = 0; i < miniNodes.length; i++) {
+                    for (let j = i + 1; j < miniNodes.length; j++) {
+                        const n1 = miniNodes[i];
+                        const n2 = miniNodes[j];
+                        const dx = n1.x - n2.x;
+                        const dy = n1.y - n2.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                        if (dist < 150) {
+                            const force = repulsion / (dist * dist);
+                            const fx = (dx / dist) * force;
+                            const fy = (dy / dist) * force;
+                            if (!n1.isCenter) { n1.vx += fx; n1.vy += fy; }
+                            if (!n2.isCenter) { n2.vx -= fx; n2.vy -= fy; }
+                        }
+                    }
+                }
+                
+                // Attraction (Edges)
+                miniEdges.forEach(edge => {
+                    const dx = edge.source.x - edge.target.x;
+                    const dy = edge.source.y - edge.target.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    const force = (dist * dist) / (k * 2) * (edge.weight * 2);
+                    const fx = (dx / dist) * force;
+                    const fy = (dy / dist) * force;
+                    
+                    if (!edge.source.isCenter) { edge.source.vx -= fx; edge.source.vy -= fy; }
+                    if (!edge.target.isCenter) { edge.target.vx += fx; edge.target.vy += fy; }
+                });
+                
+                // Keep center node pinned to middle
+                miniNodes[0].x = kwicNetworkCanvas.width / 2;
+                miniNodes[0].y = kwicNetworkCanvas.height / 2;
+                miniNodes[0].vx = 0;
+                miniNodes[0].vy = 0;
+                
+                // Apply velocity & bounds
+                miniNodes.forEach(node => {
+                    if (!node.isCenter) {
+                        node.x += node.vx * 0.1;
+                        node.y += node.vy * 0.1;
+                        // Damping
+                        node.vx *= 0.85;
+                        node.vy *= 0.85;
+                        // Bounds
+                        node.x = Math.max(20, Math.min(kwicNetworkCanvas.width - 20, node.x));
+                        node.y = Math.max(20, Math.min(kwicNetworkCanvas.height - 20, node.y));
+                    }
+                });
+                
+                drawNetworkOnCanvas(kwicNetworkCanvas, miniNodes, miniEdges, selectedTheme, selectedFont, isDarkTheme, 1.0);
+                
+                // Draw special center highlight
+                const ctx = kwicNetworkCanvas.getContext('2d');
+                ctx.beginPath();
+                ctx.arc(miniNodes[0].x, miniNodes[0].y, miniNodes[0].radius + 4, 0, 2 * Math.PI, false);
+                ctx.strokeStyle = isDarkTheme ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                kwicNetworkAnimationFrameId = requestAnimationFrame(renderMiniNetwork);
+            }
+            
+            renderMiniNetwork();
+            
+        } else {
+            kwicNetworkCanvas.parentElement.style.display = 'none';
+        }
+    } else if (kwicNetworkCanvas) {
+        kwicNetworkCanvas.parentElement.style.display = 'none';
+    }
+    
     kwicOverlay.style.display = 'flex';
 }
 
 function closeKWICModal() {
     kwicOverlay.style.display = 'none';
+    if (kwicNetworkAnimationFrameId) {
+        cancelAnimationFrame(kwicNetworkAnimationFrameId);
+        kwicNetworkAnimationFrameId = null;
+    }
 }
 
 if (kwicCloseBtn) {
