@@ -2553,7 +2553,7 @@ function drawNetworkLegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount
 }
 
 // Helper to draw the Co-occurrence Network on any canvas
-function drawNetworkOnCanvas(canvas, nodes, edges, selectedTheme, selectedFont, isDarkTheme, customScale = null) {
+function drawNetworkOnCanvas(canvas, nodes, edges, selectedTheme, selectedFont, isDarkTheme, customScale = null, showLegend = true) {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
@@ -2625,10 +2625,12 @@ function drawNetworkOnCanvas(canvas, nodes, edges, selectedTheme, selectedFont, 
     });
 
     // 4. Draw Legend card in bottom-left corner
-    const counts = nodes.map(n => n.count);
-    const minCount = counts.length > 0 ? Math.min(...counts) : 1;
-    const maxCount = counts.length > 0 ? Math.max(...counts) : 1;
-    drawNetworkLegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, selectedFont);
+    if (showLegend) {
+        const counts = nodes.map(n => n.count);
+        const minCount = counts.length > 0 ? Math.min(...counts) : 1;
+        const maxCount = counts.length > 0 ? Math.max(...counts) : 1;
+        drawNetworkLegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, selectedFont);
+    }
 }
 
 // Helper to draw PCA Legend on any canvas
@@ -3714,6 +3716,11 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
     // Variables for KWIC Mini Network
     const kwicCoocCounts = {};
     const matchingSentences = [];
+    const allowedPOS = [];
+    if (posNoun && posNoun.checked) allowedPOS.push('名詞');
+    if (posVerb && posVerb.checked) allowedPOS.push('動詞');
+    if (posAdj && posAdj.checked) allowedPOS.push('形容詞');
+    if (posAdv && posAdv.checked) allowedPOS.push('副詞');
     
     for (let i = 0; i < globalAnalyzedLines.length; i++) {
         // Merge compound words just like we do in processAndRender
@@ -3911,8 +3918,8 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
             // Physics simulation loop
             function renderMiniNetwork() {
                 // Apply simple force-directed layout
-                const k = Math.sqrt((kwicNetworkCanvas.width * kwicNetworkCanvas.height) / miniNodes.length);
-                const repulsion = 1500;
+                // Using a constant optimal distance to ensure nodes spread out
+                const optimalDist = 120;
                 
                 // Repulsion
                 for (let i = 0; i < miniNodes.length; i++) {
@@ -3921,11 +3928,14 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
                         const n2 = miniNodes[j];
                         const dx = n1.x - n2.x;
                         const dy = n1.y - n2.y;
-                        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                        if (dist < 150) {
-                            const force = repulsion / (dist * dist);
-                            const fx = (dx / dist) * force;
-                            const fy = (dy / dist) * force;
+                        let dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist === 0) { dist = 1; n1.x += Math.random(); n2.x -= Math.random(); }
+                        
+                        // Inverse-square repulsion
+                        if (dist < optimalDist * 2) {
+                            const force = (optimalDist * optimalDist) / dist;
+                            const fx = (dx / dist) * force * 0.05;
+                            const fy = (dy / dist) * force * 0.05;
                             if (!n1.isCenter) { n1.vx += fx; n1.vy += fy; }
                             if (!n2.isCenter) { n2.vx -= fx; n2.vy -= fy; }
                         }
@@ -3936,10 +3946,13 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
                 miniEdges.forEach(edge => {
                     const dx = edge.source.x - edge.target.x;
                     const dy = edge.source.y - edge.target.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                    const force = (dist * dist) / (k * 2) * (edge.weight * 2);
-                    const fx = (dx / dist) * force;
-                    const fy = (dy / dist) * force;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist === 0) dist = 1;
+                    
+                    // Spring-like attraction based on weight
+                    const force = (dist * dist) / optimalDist;
+                    const fx = (dx / dist) * force * edge.weight * 0.002;
+                    const fy = (dy / dist) * force * edge.weight * 0.002;
                     
                     if (!edge.source.isCenter) { edge.source.vx -= fx; edge.source.vy -= fy; }
                     if (!edge.target.isCenter) { edge.target.vx += fx; edge.target.vy += fy; }
@@ -3959,13 +3972,16 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
                         // Damping
                         node.vx *= 0.85;
                         node.vy *= 0.85;
-                        // Bounds
-                        node.x = Math.max(20, Math.min(kwicNetworkCanvas.width - 20, node.x));
-                        node.y = Math.max(20, Math.min(kwicNetworkCanvas.height - 20, node.y));
+                        // Bounds (increase padding so labels aren't cut off)
+                        const padX = 40;
+                        const padYTop = 40;
+                        const padYBottom = 20;
+                        node.x = Math.max(padX, Math.min(kwicNetworkCanvas.width - padX, node.x));
+                        node.y = Math.max(padYTop, Math.min(kwicNetworkCanvas.height - padYBottom, node.y));
                     }
                 });
                 
-                drawNetworkOnCanvas(kwicNetworkCanvas, miniNodes, miniEdges, selectedTheme, selectedFont, isDarkTheme, 1.0);
+                drawNetworkOnCanvas(kwicNetworkCanvas, miniNodes, miniEdges, selectedTheme, selectedFont, isDarkTheme, 1.0, false);
                 
                 // Draw special center highlight
                 const ctx = kwicNetworkCanvas.getContext('2d');
