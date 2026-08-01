@@ -864,6 +864,11 @@ function updateClusterCountGroupVisibility() {
             cloudColorGroup.style.display = 'none';
         }
     }
+    if (displayType && displayType.value === 'network') {
+        if (networkThresholdGroup) networkThresholdGroup.style.display = 'block';
+    } else {
+        if (networkThresholdGroup) networkThresholdGroup.style.display = 'none';
+    }
 
     if (methodDescription && displayType) {
         const type = displayType.value;
@@ -910,7 +915,7 @@ function updateClusterCountGroupVisibility() {
                     <li><strong>グループをまたぐ語</strong> = 複数テーマをつなぐ「橋渡し役」</li>
                     <li><strong>孤立している語</strong> = 他の主要なキーワードと一緒に使われることが少ない、独立した話題の語</li>
                 </ul>
-                <div class="tips-note">💡 「最小出現回数」を上げるとノイズが減り、テーマがくっきりします。「最大表示単語数」を絞ると主要な関係だけが残ります。</div>
+                <div class="tips-note">💡 「繋がりやすさ」の数値を<strong>小さくすると線が増え</strong>（細かい関係が見える）、<strong>大きくすると線が減り</strong>（強い結びつきだけが残る）ます。「最小出現回数」を上げるとノイズが減り、テーマがくっきりします。</div>
             </div>`;
 
         } else if (type === 'pca') {
@@ -3208,6 +3213,13 @@ function updateWordCloud() {
             const gravity = 0.02;
             const cx = cloudCanvas.width / 2;
             const cy = cloudCanvas.height / 2;
+            
+            // シミュレーテッド・アニーリング（徐々に動きを固くする）
+            const cooling = 1 - (ticks / maxTicks);
+            const damping = 0.60 + (0.25 * cooling); // 0.85から0.60へ徐々に減衰
+            
+            let totalVelocity = 0;
+
             networkNodes.forEach(node => {
                 const dx = cx - node.x;
                 const dy = cy - node.y;
@@ -3216,8 +3228,10 @@ function updateWordCloud() {
 
                 node.x += node.vx;
                 node.y += node.vy;
-                node.vx *= 0.82;
-                node.vy *= 0.82;
+                node.vx *= damping;
+                node.vy *= damping;
+                
+                totalVelocity += Math.abs(node.vx) + Math.abs(node.vy);
 
                 node.x = Math.max(node.radius + 15, Math.min(cloudCanvas.width - node.radius - 15, node.x));
                 node.y = Math.max(node.radius + 15, Math.min(cloudCanvas.height - node.radius - 15, node.y));
@@ -3226,6 +3240,14 @@ function updateWordCloud() {
             drawNetworkOnCanvas(cloudCanvas, networkNodes, networkEdges, selectedTheme, selectedFont, isDarkTheme);
             
             ticks++;
+            
+            // 速度が十分に落ちたら早期終了して描画を確定
+            if (totalVelocity < 0.5 && ticks > 60) {
+                cancelAnimationFrame(networkAnimationFrameId);
+                networkAnimationFrameId = null;
+                return;
+            }
+
             networkAnimationFrameId = requestAnimationFrame(simulationTick);
         }
 
