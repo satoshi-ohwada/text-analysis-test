@@ -865,7 +865,7 @@ function updateClusterCountGroupVisibility() {
         }
     }
     if (displayType && displayType.value === 'network') {
-        if (networkThresholdGroup) networkThresholdGroup.style.display = 'block';
+        if (networkThresholdGroup) networkThresholdGroup.style.display = 'none'; // hidden for now as per user request
     } else {
         if (networkThresholdGroup) networkThresholdGroup.style.display = 'none';
     }
@@ -1769,9 +1769,7 @@ function processAndRender() {
         const denom = cA + cB - fAB;
         const jaccard = denom > 0 ? fAB / denom : 0;
         
-        const currentThreshold = networkThresholdRange ? parseFloat(networkThresholdRange.value) : 0.05;
-        // Optimization: only add edges that are somewhat strong (but lower than UI threshold so we have wiggle room)
-        if (jaccard >= Math.min(0.01, currentThreshold / 2)) {
+        if (jaccard > 0.04) {
             rawEdges.push({ sourceId: w1, targetId: w2, weight: jaccard });
         }
     });
@@ -1779,11 +1777,11 @@ function processAndRender() {
     rawEdges.sort((a, b) => b.weight - a.weight);
     
     // Filter to only meaningfully strong connections based on UI
-    const finalThreshold = networkThresholdRange ? parseFloat(networkThresholdRange.value) : 0.05;
+    const finalThreshold = 0.05;
     const strictEdges = rawEdges.filter(e => e.weight >= finalThreshold);
     
     // Limit to exactly 1.0 * maxWords to naturally separate the graph into disjoint communities
-    const topEdges = strictEdges.slice(0, Math.round(maxWords * 1.5));
+    const topEdges = strictEdges.slice(0, Math.round(maxWords * 1.0));
 
     const networkNodesSet = new Set();
     topEdges.forEach(e => {
@@ -3213,13 +3211,6 @@ function updateWordCloud() {
             const gravity = 0.02;
             const cx = cloudCanvas.width / 2;
             const cy = cloudCanvas.height / 2;
-            
-            // シミュレーテッド・アニーリング（徐々に動きを固くする）
-            const cooling = 1 - (ticks / maxTicks);
-            const damping = 0.60 + (0.25 * cooling); // 0.85から0.60へ徐々に減衰
-            
-            let totalVelocity = 0;
-
             networkNodes.forEach(node => {
                 const dx = cx - node.x;
                 const dy = cy - node.y;
@@ -3228,10 +3219,8 @@ function updateWordCloud() {
 
                 node.x += node.vx;
                 node.y += node.vy;
-                node.vx *= damping;
-                node.vy *= damping;
-                
-                totalVelocity += Math.abs(node.vx) + Math.abs(node.vy);
+                node.vx *= 0.82;
+                node.vy *= 0.82;
 
                 node.x = Math.max(node.radius + 15, Math.min(cloudCanvas.width - node.radius - 15, node.x));
                 node.y = Math.max(node.radius + 15, Math.min(cloudCanvas.height - node.radius - 15, node.y));
@@ -3240,14 +3229,6 @@ function updateWordCloud() {
             drawNetworkOnCanvas(cloudCanvas, networkNodes, networkEdges, selectedTheme, selectedFont, isDarkTheme);
             
             ticks++;
-            
-            // 速度が十分に落ちたら早期終了して描画を確定
-            if (totalVelocity < 0.5 && ticks > 60) {
-                cancelAnimationFrame(networkAnimationFrameId);
-                networkAnimationFrameId = null;
-                return;
-            }
-
             networkAnimationFrameId = requestAnimationFrame(simulationTick);
         }
 
