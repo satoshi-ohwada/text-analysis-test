@@ -56,6 +56,9 @@ const minCountRange = document.getElementById('min-count-range');
 const minCountVal = document.getElementById('min-count-val');
 const maxWordsRange = document.getElementById('max-words-range');
 const maxWordsVal = document.getElementById('max-words-val');
+const networkThresholdGroup = document.getElementById('network-threshold-group');
+const networkThresholdRange = document.getElementById('network-threshold-range');
+const networkThresholdVal = document.getElementById('network-threshold-val');
 const colorTheme = document.getElementById('color-theme');
 const fontSelect = document.getElementById('font-select');
 const shapeCircle = document.getElementById('shape-circle');
@@ -112,6 +115,33 @@ function updateStatsBar(lines, totalWords, uniqueWords) {
 // Sample Opinions Text (Demo Data) is now loaded dynamically from data/sample.txt
 
 // 1. Initialize Kuromoji and Load Stop Words
+function saveSettings() {
+    localStorage.setItem('customStopWords', JSON.stringify(Array.from(customStopWords)));
+    localStorage.setItem('customCompoundWords', JSON.stringify(Array.from(customCompoundWords)));
+    localStorage.setItem('customSynonymRules', JSON.stringify(Array.from(customSynonymRules.entries())));
+}
+
+function loadSettings() {
+    try {
+        const storedStopWords = localStorage.getItem('customStopWords');
+        if (storedStopWords) {
+            customStopWords = new Set(JSON.parse(storedStopWords));
+        }
+        
+        const storedCompoundWords = localStorage.getItem('customCompoundWords');
+        if (storedCompoundWords) {
+            customCompoundWords = new Set(JSON.parse(storedCompoundWords));
+        }
+        
+        const storedSynonymRules = localStorage.getItem('customSynonymRules');
+        if (storedSynonymRules) {
+            customSynonymRules = new Map(JSON.parse(storedSynonymRules));
+        }
+    } catch (e) {
+        console.error("Failed to load settings from localStorage", e);
+    }
+}
+
 async function initKuromoji() {
     loadingOverlay.style.display = 'flex';
     loadingText.innerText = "日本語解析辞書と除外リストをロード中...";
@@ -151,6 +181,8 @@ async function initKuromoji() {
             loadingOverlay.style.display = 'none';
         }, 500);
         
+        loadSettings();
+        
         renderStopWords();
         renderCompoundWords();
         renderSynonymRules();
@@ -178,6 +210,7 @@ function renderStopWords() {
         btn.addEventListener('click', (e) => {
             const word = e.currentTarget.getAttribute('data-word');
             customStopWords.delete(word);
+            saveSettings();
             renderStopWords();
             if (rawTextData) {
                 processAndRender();
@@ -201,6 +234,7 @@ function addStopWord(word) {
     });
 
     if (added) {
+        saveSettings();
         renderStopWords();
         if (rawTextData) {
             processAndRender();
@@ -229,6 +263,7 @@ function renderCompoundWords() {
         btn.addEventListener('click', (e) => {
             const word = e.currentTarget.getAttribute('data-word');
             customCompoundWords.delete(word);
+            saveSettings();
             renderCompoundWords();
             if (rawTextData) {
                 processAndRender();
@@ -252,6 +287,7 @@ function addCompoundWord(word) {
     });
 
     if (added) {
+        saveSettings();
         renderCompoundWords();
         if (rawTextData) {
             processAndRender();
@@ -280,6 +316,7 @@ function renderSynonymRules() {
         btn.addEventListener('click', (e) => {
             const word = e.currentTarget.getAttribute('data-word');
             customSynonymRules.delete(word);
+            saveSettings();
             renderSynonymRules();
             if (rawTextData) {
                 processAndRender();
@@ -295,6 +332,7 @@ function addSynonymRule(fromWord, toWord) {
     
     if (customSynonymRules.get(fromWord) !== toWord) {
         customSynonymRules.set(fromWord, toWord);
+        saveSettings();
         renderSynonymRules();
         if (rawTextData) {
             processAndRender();
@@ -769,6 +807,15 @@ maxWordsRange.addEventListener('input', (e) => {
         updateWordCloud();
     }
 });
+
+if (networkThresholdRange) {
+    networkThresholdRange.addEventListener('input', (e) => {
+        if (networkThresholdVal) networkThresholdVal.innerText = e.target.value;
+        if (displayType.value === 'network' && rawTextData) {
+            processAndRender();
+        }
+    });
+}
 
 // Render triggers for filters
 [posNoun, posVerb, posAdj, posAdv, mergeNounsCheckbox, document.getElementById('ranking-method')].forEach(elem => {
@@ -1716,18 +1763,22 @@ function processAndRender() {
         const cB = docFreq[w2] || 0;
         const denom = cA + cB - fAB;
         const jaccard = denom > 0 ? fAB / denom : 0;
-        if (jaccard > 0.04) {
+        
+        const currentThreshold = networkThresholdRange ? parseFloat(networkThresholdRange.value) : 0.05;
+        // Optimization: only add edges that are somewhat strong (but lower than UI threshold so we have wiggle room)
+        if (jaccard >= Math.min(0.01, currentThreshold / 2)) {
             rawEdges.push({ sourceId: w1, targetId: w2, weight: jaccard });
         }
     });
     
     rawEdges.sort((a, b) => b.weight - a.weight);
     
-    // Filter to only meaningfully strong connections
-    const strictEdges = rawEdges.filter(e => e.weight > 0.05);
+    // Filter to only meaningfully strong connections based on UI
+    const finalThreshold = networkThresholdRange ? parseFloat(networkThresholdRange.value) : 0.05;
+    const strictEdges = rawEdges.filter(e => e.weight >= finalThreshold);
     
     // Limit to exactly 1.0 * maxWords to naturally separate the graph into disjoint communities
-    const topEdges = strictEdges.slice(0, Math.round(maxWords * 1.0));
+    const topEdges = strictEdges.slice(0, Math.round(maxWords * 1.5));
 
     const networkNodesSet = new Set();
     topEdges.forEach(e => {
@@ -3916,7 +3967,9 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
             }
             
             // Physics simulation loop
+            let frameCount = 0;
             function renderMiniNetwork() {
+                frameCount++;
                 // Apply simple force-directed layout
                 // Using a constant optimal distance to ensure nodes spread out
                 const optimalDist = 120;
@@ -3991,7 +4044,15 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
                 ctx.lineWidth = 2;
                 ctx.stroke();
                 
-                kwicNetworkAnimationFrameId = requestAnimationFrame(renderMiniNetwork);
+                // Calculate total velocity (kinetic energy) to see if we can stop
+                let totalVelocity = 0;
+                miniNodes.forEach(n => { totalVelocity += Math.abs(n.vx) + Math.abs(n.vy); });
+                
+                if (totalVelocity > 0.5 && frameCount < 300) {
+                    kwicNetworkAnimationFrameId = requestAnimationFrame(renderMiniNetwork);
+                } else {
+                    kwicNetworkAnimationFrameId = null;
+                }
             }
             
             renderMiniNetwork();
