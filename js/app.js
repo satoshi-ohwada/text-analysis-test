@@ -17,6 +17,7 @@ let customStopWords = new Set();
 
 // Network Graph State
 let networkNodes = [];
+let oldNetworkNodes = [];
 let networkEdges = [];
 let networkAnimationFrameId = null;
 let kwicNetworkAnimationFrameId = null;
@@ -1629,6 +1630,8 @@ function mergeConsecutiveNouns(tokens) {
 function processAndRender() {
     if (!tokenizer || !rawTextData || globalAnalyzedLines.length === 0) return;
 
+    oldNetworkNodes = [...networkNodes];
+
     if (emptyState) emptyState.style.display = 'none';
 
     const allowedPOS = [];
@@ -3143,7 +3146,7 @@ function updateWordCloud() {
             isForceRelayout = false;
         } else {
             const prevNodeMap = new Map();
-            networkNodes.forEach(n => prevNodeMap.set(n.id, { x: n.x, y: n.y }));
+            oldNetworkNodes.forEach(n => prevNodeMap.set(n.id, { x: n.x, y: n.y }));
             
             networkNodes.forEach(node => {
                 if (prevNodeMap.has(node.id)) {
@@ -3163,72 +3166,80 @@ function updateWordCloud() {
         let ticks = 0;
         
         function simulationTick() {
+            // 物理演算を1フレームにつき複数回進めて、見た目上の安定化を早める
+            const stepsPerFrame = 4;
+            
+            for (let step = 0; step < stepsPerFrame; step++) {
+                if (ticks >= maxTicks) break;
+
+                const repulsion = 300;
+                for (let i = 0; i < networkNodes.length; i++) {
+                    const n1 = networkNodes[i];
+                    for (let j = i + 1; j < networkNodes.length; j++) {
+                        const n2 = networkNodes[j];
+                        const dx = n2.x - n1.x;
+                        const dy = n2.y - n1.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                        
+                        if (dist < 300) {
+                            const force = repulsion / (dist * dist);
+                            const fx = force * (dx / dist);
+                            const fy = force * (dy / dist);
+                            
+                            n1.vx -= fx * 25;
+                            n1.vy -= fy * 25;
+                            n2.vx += fx * 25;
+                            n2.vy += fy * 25;
+                        }
+                    }
+                }
+
+                const springStrength = 0.15;
+                const restLength = 60;
+                networkEdges.forEach(edge => {
+                    const dx = edge.target.x - edge.source.x;
+                    const dy = edge.target.y - edge.source.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    
+                    const force = springStrength * (dist - restLength) * (edge.weight * 2.5);
+                    const fx = force * (dx / dist);
+                    const fy = force * (dy / dist);
+                    
+                    edge.source.vx += fx;
+                    edge.source.vy += fy;
+                    edge.target.vx -= fx;
+                    edge.target.vy -= fy;
+                });
+
+                const gravity = 0.02;
+                const cx = cloudCanvas.width / 2;
+                const cy = cloudCanvas.height / 2;
+                networkNodes.forEach(node => {
+                    const dx = cx - node.x;
+                    const dy = cy - node.y;
+                    node.vx += dx * gravity;
+                    node.vy += dy * gravity;
+
+                    node.x += node.vx;
+                    node.y += node.vy;
+                    node.vx *= 0.82;
+                    node.vy *= 0.82;
+
+                    node.x = Math.max(node.radius + 15, Math.min(cloudCanvas.width - node.radius - 15, node.x));
+                    node.y = Math.max(node.radius + 15, Math.min(cloudCanvas.height - node.radius - 15, node.y));
+                });
+                
+                ticks++;
+            }
+
+            drawNetworkOnCanvas(cloudCanvas, networkNodes, networkEdges, selectedTheme, selectedFont, isDarkTheme);
+            
             if (ticks >= maxTicks) {
                 cancelAnimationFrame(networkAnimationFrameId);
                 networkAnimationFrameId = null;
                 return;
             }
-
-            const repulsion = 300;
-            for (let i = 0; i < networkNodes.length; i++) {
-                const n1 = networkNodes[i];
-                for (let j = i + 1; j < networkNodes.length; j++) {
-                    const n2 = networkNodes[j];
-                    const dx = n2.x - n1.x;
-                    const dy = n2.y - n1.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                    
-                    if (dist < 300) {
-                        const force = repulsion / (dist * dist);
-                        const fx = force * (dx / dist);
-                        const fy = force * (dy / dist);
-                        
-                        n1.vx -= fx * 25;
-                        n1.vy -= fy * 25;
-                        n2.vx += fx * 25;
-                        n2.vy += fy * 25;
-                    }
-                }
-            }
-
-            const springStrength = 0.15;
-            const restLength = 60;
-            networkEdges.forEach(edge => {
-                const dx = edge.target.x - edge.source.x;
-                const dy = edge.target.y - edge.source.y;
-                const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                
-                const force = springStrength * (dist - restLength) * (edge.weight * 2.5);
-                const fx = force * (dx / dist);
-                const fy = force * (dy / dist);
-                
-                edge.source.vx += fx;
-                edge.source.vy += fy;
-                edge.target.vx -= fx;
-                edge.target.vy -= fy;
-            });
-
-            const gravity = 0.02;
-            const cx = cloudCanvas.width / 2;
-            const cy = cloudCanvas.height / 2;
-            networkNodes.forEach(node => {
-                const dx = cx - node.x;
-                const dy = cy - node.y;
-                node.vx += dx * gravity;
-                node.vy += dy * gravity;
-
-                node.x += node.vx;
-                node.y += node.vy;
-                node.vx *= 0.82;
-                node.vy *= 0.82;
-
-                node.x = Math.max(node.radius + 15, Math.min(cloudCanvas.width - node.radius - 15, node.x));
-                node.y = Math.max(node.radius + 15, Math.min(cloudCanvas.height - node.radius - 15, node.y));
-            });
-
-            drawNetworkOnCanvas(cloudCanvas, networkNodes, networkEdges, selectedTheme, selectedFont, isDarkTheme);
             
-            ticks++;
             networkAnimationFrameId = requestAnimationFrame(simulationTick);
         }
 
