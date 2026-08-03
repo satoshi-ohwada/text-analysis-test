@@ -2535,18 +2535,19 @@ function getNetworkNodeColor(theme, indexOrNode, isDarkTheme) {
 // Helper to draw a clean, professional legend matching KH Coder outputs
 function drawNetworkLegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, maxCount, selectedFont) {
     const scaleFactor = canvasWidth / 1024;
-    const x = 25 * scaleFactor;
-    const y = canvasHeight - 110 * scaleFactor;
+    const w = 265 * scaleFactor;
+    const h = 56 * scaleFactor;
+    const x = canvasWidth - w - 15 * scaleFactor; // 画面右下に配置
+    const y = canvasHeight - h - 15 * scaleFactor;
     
     ctx.save();
     
-    ctx.fillStyle = isDarkTheme ? 'rgba(22, 31, 48, 0.85)' : 'rgba(255, 255, 255, 0.9)';
-    ctx.strokeStyle = isDarkTheme ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.12)';
+    // 半透明の背景でグラフの邪魔になりにくくする
+    ctx.fillStyle = isDarkTheme ? 'rgba(22, 31, 48, 0.75)' : 'rgba(255, 255, 255, 0.85)';
+    ctx.strokeStyle = isDarkTheme ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.15)';
     ctx.lineWidth = 1 * scaleFactor;
     
     ctx.beginPath();
-    const w = 240 * scaleFactor;
-    const h = 85 * scaleFactor;
     const r = 6 * scaleFactor;
     ctx.moveTo(x + r, y);
     ctx.lineTo(x + w - r, y);
@@ -2562,49 +2563,53 @@ function drawNetworkLegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount
     ctx.stroke();
     
     ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillStyle = isDarkTheme ? '#F3F4F6' : '#111111';
-    ctx.font = `bold ${Math.round(11 * scaleFactor)}px ${selectedFont}`;
-    ctx.fillText("凡例 (Legend)", x + 12 * scaleFactor, y + 8 * scaleFactor);
+    ctx.textBaseline = 'middle';
+    ctx.font = `${Math.round(11 * scaleFactor)}px ${selectedFont}`;
     
-    ctx.font = `${Math.round(9.5 * scaleFactor)}px ${selectedFont}`;
-    ctx.fillStyle = isDarkTheme ? '#9CA3AF' : '#4B5563';
-    ctx.fillText("円の大きさ: 出現回数", x + 12 * scaleFactor, y + 25 * scaleFactor);
+    // 1行目: 円の大きさ
+    const row1Y = y + 18 * scaleFactor;
+    ctx.fillStyle = isDarkTheme ? '#E5E7EB' : '#374151';
+    ctx.fillText("円の大きさ (出現回数):", x + 12 * scaleFactor, row1Y);
     
-    const cY = y + 44 * scaleFactor;
-    const rSmall = 5 * scaleFactor;
-    const rLarge = 12 * scaleFactor;
+    const rSmall = 4 * scaleFactor;
+    const rLarge = 9 * scaleFactor;
     
     ctx.beginPath();
-    ctx.arc(x + 22 * scaleFactor, cY, rSmall, 0, 2 * Math.PI);
-    ctx.fillStyle = isDarkTheme ? '#6B7280' : '#9CA3AF';
+    ctx.arc(x + 145 * scaleFactor, row1Y, rSmall, 0, 2 * Math.PI);
+    ctx.fillStyle = isDarkTheme ? '#9CA3AF' : '#6B7280';
     ctx.fill();
-    ctx.fillText(`${minCount}回`, x + 34 * scaleFactor, cY - 4 * scaleFactor);
+    ctx.fillText(`${minCount}`, x + 155 * scaleFactor, row1Y);
+    
+    ctx.fillText("〜", x + 180 * scaleFactor, row1Y);
     
     ctx.beginPath();
-    ctx.arc(x + 85 * scaleFactor, cY, rLarge, 0, 2 * Math.PI);
-    ctx.fillStyle = isDarkTheme ? '#6B7280' : '#9CA3AF';
+    ctx.arc(x + 205 * scaleFactor, row1Y, rLarge, 0, 2 * Math.PI);
+    ctx.fillStyle = isDarkTheme ? '#9CA3AF' : '#6B7280';
     ctx.fill();
-    ctx.fillText(`${maxCount}回`, x + 104 * scaleFactor, cY - 4 * scaleFactor);
+    ctx.fillText(`${maxCount}`, x + 220 * scaleFactor, row1Y);
+
+    // 2行目: 線の太さ
+    const row2Y = y + 38 * scaleFactor;
+    ctx.fillStyle = isDarkTheme ? '#E5E7EB' : '#374151';
+    ctx.fillText("線の太さ (共起の強さ):", x + 12 * scaleFactor, row2Y);
     
-    ctx.fillText("線の太さ: 共起の強さ (Jaccard係数)", x + 12 * scaleFactor, y + 64 * scaleFactor);
-    
-    const lY = y + 75 * scaleFactor;
     ctx.beginPath();
-    ctx.moveTo(x + 20 * scaleFactor, lY);
-    ctx.lineTo(x + 55 * scaleFactor, lY);
-    ctx.strokeStyle = isDarkTheme ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)';
+    ctx.moveTo(x + 135 * scaleFactor, row2Y);
+    ctx.lineTo(x + 155 * scaleFactor, row2Y);
+    ctx.strokeStyle = isDarkTheme ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)';
     ctx.lineWidth = 1 * scaleFactor;
     ctx.stroke();
-    ctx.fillText("弱い", x + 60 * scaleFactor, lY - 4 * scaleFactor);
+    
+    ctx.fillText("弱", x + 160 * scaleFactor, row2Y);
+    ctx.fillText("〜", x + 180 * scaleFactor, row2Y);
     
     ctx.beginPath();
-    ctx.moveTo(x + 110 * scaleFactor, lY);
-    ctx.lineTo(x + 145 * scaleFactor, lY);
-    ctx.strokeStyle = isDarkTheme ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.8)';
-    ctx.lineWidth = 5 * scaleFactor;
+    ctx.moveTo(x + 195 * scaleFactor, row2Y);
+    ctx.lineTo(x + 215 * scaleFactor, row2Y);
+    ctx.strokeStyle = isDarkTheme ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.8)';
+    ctx.lineWidth = 4 * scaleFactor;
     ctx.stroke();
-    ctx.fillText("強い", x + 150 * scaleFactor, lY - 4 * scaleFactor);
+    ctx.fillText("強", x + 220 * scaleFactor, row2Y);
     
     ctx.restore();
 }
