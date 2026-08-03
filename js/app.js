@@ -1715,9 +1715,17 @@ function processAndRender() {
         });
 
     if (rankingMethod === 'tfidf') {
-        wordFrequencies.sort((a, b) => b.tfidf - a.tfidf);
+        wordFrequencies.sort((a, b) => {
+            if (b.tfidf !== a.tfidf) return b.tfidf - a.tfidf; // 1. TF-IDF値
+            if (b.count !== a.count) return b.count - a.count; // 2. 出現回数（同点の場合）
+            return a.text.localeCompare(b.text, 'ja');         // 3. 五十音順（それでも同点の場合）
+        });
     } else {
-        wordFrequencies.sort((a, b) => b.count - a.count);
+        wordFrequencies.sort((a, b) => {
+            if (b.count !== a.count) return b.count - a.count; // 1. 出現回数
+            if (b.tfidf !== a.tfidf) return b.tfidf - a.tfidf; // 2. TF-IDF値（同点で特徴的な単語を優先）
+            return a.text.localeCompare(b.text, 'ja');         // 3. 五十音順
+        });
     }
 
     if (wordFrequencies.length > 0) {
