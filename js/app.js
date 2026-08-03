@@ -3177,9 +3177,14 @@ function updateWordCloud() {
                     const n1 = networkNodes[i];
                     for (let j = i + 1; j < networkNodes.length; j++) {
                         const n2 = networkNodes[j];
-                        const dx = n2.x - n1.x;
-                        const dy = n2.y - n1.y;
-                        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                        let dx = n2.x - n1.x;
+                        let dy = n2.y - n1.y;
+                        if (dx === 0 && dy === 0) {
+                            dx = (Math.random() - 0.5) * 5;
+                            dy = (Math.random() - 0.5) * 5;
+                        }
+                        // 重なり合っているときの爆発（無限大の力）を防ぐために距離の下限を設ける
+                        const dist = Math.max(15, Math.sqrt(dx * dx + dy * dy));
                         
                         if (dist < 300) {
                             const force = repulsion / (dist * dist);
@@ -3197,9 +3202,13 @@ function updateWordCloud() {
                 const springStrength = 0.15;
                 const restLength = 60;
                 networkEdges.forEach(edge => {
-                    const dx = edge.target.x - edge.source.x;
-                    const dy = edge.target.y - edge.source.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    let dx = edge.target.x - edge.source.x;
+                    let dy = edge.target.y - edge.source.y;
+                    if (dx === 0 && dy === 0) {
+                        dx = (Math.random() - 0.5) * 5;
+                        dy = (Math.random() - 0.5) * 5;
+                    }
+                    const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
                     
                     const force = springStrength * (dist - restLength) * (edge.weight * 2.5);
                     const fx = force * (dx / dist);
