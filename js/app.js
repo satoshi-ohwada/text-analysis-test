@@ -1917,13 +1917,34 @@ function processAndRender() {
         let traceOfCov = 0;
         for (let i = 0; i < V; i++) traceOfCov += cov[i][i];
 
-        function powerIteration(A, maxIter = 200) {
+        function powerIteration(A, vPrev = null, maxIter = 200) {
             const n = A.length;
-            // Use deterministic all-ones initial vector instead of random,
-            // so PCA results are reproducible for the same dataset.
-            let b = new Float64Array(n).fill(1.0);
-            
-            let norm = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0)) || 1;
+            // Use deterministic initial vector with gentle alternating perturbations so PCA results
+            // are reproducible while preventing symmetry traps in deflation.
+            let b = new Float64Array(n);
+            for (let i = 0; i < n; i++) {
+                b[i] = 1.0 + Math.sin(i + 1) * 0.5;
+            }
+
+            // If a previous eigenvector vPrev is supplied, project b onto its orthogonal subspace
+            if (vPrev) {
+                let dot = 0;
+                for (let i = 0; i < n; i++) dot += b[i] * vPrev[i];
+                for (let i = 0; i < n; i++) b[i] -= dot * vPrev[i];
+            }
+
+            let norm = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
+            if (norm < 1e-6) {
+                // Fallback: standard coordinate basis
+                b.fill(0);
+                b[0] = 1.0;
+                if (vPrev) {
+                    let dot = vPrev[0];
+                    for (let i = 0; i < n; i++) b[i] -= dot * vPrev[i];
+                    norm = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
+                }
+            }
+            norm = norm || 1;
             for (let i = 0; i < n; i++) b[i] /= norm;
             
             for (let iter = 0; iter < maxIter; iter++) {
@@ -1936,7 +1957,8 @@ function processAndRender() {
                     nextB[i] = sum;
                 }
                 
-                const nextNorm = Math.sqrt(nextB.reduce((sum, val) => sum + val * val, 0)) || 1;
+                const nextNorm = Math.sqrt(nextB.reduce((sum, val) => sum + val * val, 0));
+                if (nextNorm < 1e-12) break;
                 
                 let diff = 0;
                 for (let i = 0; i < n; i++) {
@@ -1971,7 +1993,7 @@ function processAndRender() {
             }
         }
         
-        const pc2Result = powerIteration(cov2);
+        const pc2Result = powerIteration(cov2, v1);
         const v2 = pc2Result.eigenvector;
         const l2 = Math.max(0, pc2Result.eigenvalue);
 
@@ -2063,7 +2085,9 @@ function runLDAAnalysis(lineWordsList, allowedWordsList) {
         let minPerplexity = Infinity;
 
     candidateK.forEach(K => {
-        const alpha = 50 / K;
+        // Use Dirichlet alpha = 0.1 suited for short texts (survey responses, comments)
+        // preventing over-smoothing and enabling sharp thematic separation.
+        const alpha = 0.1;
         const beta = 0.1;
 
         const n_dk = Array.from({ length: D }, () => new Int32Array(K));
@@ -2146,7 +2170,7 @@ function runLDAAnalysis(lineWordsList, allowedWordsList) {
 
     // --- Final Sampling for Best K ---
     const K = bestK;
-    const alpha = 50 / K;
+    const alpha = 0.1;
     const beta = 0.1;
 
     const n_dk = Array.from({ length: D }, () => new Int32Array(K));
