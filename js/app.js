@@ -27,6 +27,9 @@ let pcaPoints = [];
 let pcaExplainedVar1 = '--'; // Variance explained by PC1 (%)
 let pcaExplainedVar2 = '--'; // Variance explained by PC2 (%)
 
+// UMAP Scatter Plot State
+let umapPoints = [];
+
 // LDA Topic Model State
 let currentLdaResult = null;
 
@@ -842,7 +845,7 @@ redrawElements.forEach(elem => {
 });
 
 function updateClusterCountGroupVisibility() {
-    if (displayType && displayType.value === 'pca') {
+    if (displayType && (displayType.value === 'pca' || displayType.value === 'umap')) {
         clusterCountGroup.style.display = 'block';
     } else if (clusterCountGroup) {
         clusterCountGroup.style.display = 'none';
@@ -921,7 +924,7 @@ function updateClusterCountGroupVisibility() {
 
         } else if (type === 'pca') {
             descHtml = `
-            <div class="method-title"><span class="method-icon">🔭</span>多変量解析（PCA散布図）</div>
+            <div class="method-title"><span class="method-icon">🔭</span>多変量解析（PCA散布図・全体傾向）</div>
             <div class="method-purpose">使われ方が似ている語を近くに配置し、回答全体のテーマの広がりや構造を俯瞰します。</div>
             <div class="reading-tips">
                 <div class="tips-title">📌 読み方のポイント</div>
@@ -932,6 +935,20 @@ function updateClusterCountGroupVisibility() {
                     <li><strong>遠く離れた語</strong> = 他の語とは全く異なる文脈で使われる語</li>
                 </ul>
                 <div class="tips-note">💡 「クラスター数」を変えるとグループ分けが変わります。共起ネットワークのグループと見比べると、より深い洞察が得られます。</div>
+            </div>`;
+        } else if (type === 'umap') {
+            descHtml = `
+            <div class="method-title"><span class="method-icon">🗺️</span>多変量解析（UMAP散布図・単語クラスタ）</div>
+            <div class="method-purpose">非線形な多様体学習により、文脈が類似する単語を凝縮させた「意味の島（クラスタ）」として可視化します。</div>
+            <div class="reading-tips">
+                <div class="tips-title">📌 読み方のポイント</div>
+                <ul class="tips-list">
+                    <li><strong>ギュッと集まった単語群（島）</strong> = 同じ文脈や場面で強く共起する緊密なテーマ</li>
+                    <li><strong>同じ色の点</strong> = K平均法で自動分類された単語クラスタ（島と綺麗に対応します）</li>
+                    <li><strong>島と島の距離</strong> = 話題や文脈の遠さ（関係のない語は離れて配置されます）</li>
+                    <li><strong>単語をクリック</strong>すると、その語が文脈中でどう使われているか（KWIC）を確認できます</li>
+                </ul>
+                <div class="tips-note">💡 PCAが「全体の広がり」を俯瞰するのに対し、UMAPは「意味の塊（クラスター）」をより鮮明に分離して発見するのに最適です。</div>
             </div>`;
         } else if (type === 'topic-lda') {
             descHtml = `
@@ -1105,11 +1122,12 @@ cloudCanvas.addEventListener('mousemove', (e) => {
             tooltip.style.display = 'none';
             cloudCanvas.style.cursor = 'default';
         }
-    } else if (currentMode === 'pca') {
-        if (pcaPoints.length === 0) return;
+    } else if (currentMode === 'pca' || currentMode === 'umap') {
+        const scatterPoints = currentMode === 'umap' ? umapPoints : pcaPoints;
+        if (scatterPoints.length === 0) return;
         
-        const xs = pcaPoints.map(p => p.x);
-        const ys = pcaPoints.map(p => p.y);
+        const xs = scatterPoints.map(p => p.x);
+        const ys = scatterPoints.map(p => p.y);
         const minX = Math.min(...xs, -0.01);
         const maxX = Math.max(...xs, 0.01);
         const minY = Math.min(...ys, -0.01);
@@ -1121,20 +1139,20 @@ cloudCanvas.addEventListener('mousemove', (e) => {
         const getCanvasY = (y) => pad + ((maxY - y) / (maxY - minY)) * (cloudCanvas.height - 2 * pad);
 
         // Cache min/max counts once outside the loop for performance
-        const pcaCounts = pcaPoints.map(p => p.count);
-        const pcaMinCount = Math.min(...pcaCounts);
-        const pcaMaxCount = Math.max(...pcaCounts);
+        const scatterCounts = scatterPoints.map(p => p.count);
+        const scatterMinCount = Math.min(...scatterCounts);
+        const scatterMaxCount = Math.max(...scatterCounts);
 
         let hoveredPoint = null;
-        for (let i = pcaPoints.length - 1; i >= 0; i--) { let pt = pcaPoints[i];
+        for (let i = scatterPoints.length - 1; i >= 0; i--) { let pt = scatterPoints[i];
             const px = getCanvasX(pt.x);
             const py = getCanvasY(pt.y);
             const dx = mouseX - px;
             const dy = mouseY - py;
             
             let radius = 10;
-            if (pcaMaxCount !== pcaMinCount) {
-                radius = 5 + ((pt.count - pcaMinCount) / (pcaMaxCount - pcaMinCount)) * 14;
+            if (scatterMaxCount !== scatterMinCount) {
+                radius = 5 + ((pt.count - scatterMinCount) / (scatterMaxCount - scatterMinCount)) * 14;
             }
             
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1155,7 +1173,8 @@ cloudCanvas.addEventListener('mousemove', (e) => {
                 const tInfo = currentLdaResult.wordTopics[hoveredPoint.word];
                 ldaTopicText = `<br><span style="color: var(--accent-blue); font-weight: 600;">所属トピック: ${tInfo.label} (${(tInfo.prob * 100).toFixed(0)}%)</span>`;
             }
-            tooltip.innerHTML = `<strong>${hoveredPoint.word}</strong><br>出現回数: ${hoveredPoint.count}回<br>クラスター: C${hoveredPoint.cluster + 1}${ldaTopicText}<br><small style="color: var(--text-muted)">ダブルクリックで除外</small>`;
+            const modeLabel = currentMode === 'umap' ? 'UMAPクラスタ' : 'クラスター';
+            tooltip.innerHTML = `<strong>${hoveredPoint.word}</strong><br>出現回数: ${hoveredPoint.count}回<br>${modeLabel}: C${hoveredPoint.cluster + 1}${ldaTopicText}<br><small style="color: var(--text-muted)">ダブルクリックで除外</small>`;
             cloudCanvas.style.cursor = 'pointer';
         } else {
             tooltip.style.display = 'none';
@@ -1219,11 +1238,12 @@ cloudCanvas.addEventListener('click', (e) => {
                 break;
             }
         }
-    } else if (currentMode === 'pca') {
-        if (pcaPoints.length === 0) return;
+    } else if (currentMode === 'pca' || currentMode === 'umap') {
+        const scatterPoints = currentMode === 'umap' ? umapPoints : pcaPoints;
+        if (scatterPoints.length === 0) return;
         
-        const xs = pcaPoints.map(p => p.x);
-        const ys = pcaPoints.map(p => p.y);
+        const xs = scatterPoints.map(p => p.x);
+        const ys = scatterPoints.map(p => p.y);
         const minX = Math.min(...xs, -0.01);
         const maxX = Math.max(...xs, 0.01);
         const minY = Math.min(...ys, -0.01);
@@ -1233,19 +1253,19 @@ cloudCanvas.addEventListener('click', (e) => {
         const getCanvasX = (x) => pad + ((x - minX) / (maxX - minX)) * (cloudCanvas.width - 2 * pad);
         const getCanvasY = (y) => pad + ((maxY - y) / (maxY - minY)) * (cloudCanvas.height - 2 * pad);
 
-        const pcaClickCounts = pcaPoints.map(p => p.count);
-        const pcaClickMinCount = Math.min(...pcaClickCounts);
-        const pcaClickMaxCount = Math.max(...pcaClickCounts);
+        const scatterClickCounts = scatterPoints.map(p => p.count);
+        const scatterClickMinCount = Math.min(...scatterClickCounts);
+        const scatterClickMaxCount = Math.max(...scatterClickCounts);
 
-        for (let i = pcaPoints.length - 1; i >= 0; i--) { let pt = pcaPoints[i];
+        for (let i = scatterPoints.length - 1; i >= 0; i--) { let pt = scatterPoints[i];
             const px = getCanvasX(pt.x);
             const py = getCanvasY(pt.y);
             const dx = mouseX - px;
             const dy = mouseY - py;
             
             let radius = 10;
-            if (pcaClickMaxCount !== pcaClickMinCount) {
-                radius = 5 + ((pt.count - pcaClickMinCount) / (pcaClickMaxCount - pcaClickMinCount)) * 14;
+            if (scatterClickMaxCount !== scatterClickMinCount) {
+                radius = 5 + ((pt.count - scatterClickMinCount) / (scatterClickMaxCount - scatterClickMinCount)) * 14;
             }
             
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1321,11 +1341,12 @@ cloudCanvas.addEventListener('dblclick', (e) => {
                 break;
             }
         }
-    } else if (currentMode === 'pca') {
-        if (pcaPoints.length === 0) return;
+    } else if (currentMode === 'pca' || currentMode === 'umap') {
+        const scatterPoints = currentMode === 'umap' ? umapPoints : pcaPoints;
+        if (scatterPoints.length === 0) return;
         
-        const xs = pcaPoints.map(p => p.x);
-        const ys = pcaPoints.map(p => p.y);
+        const xs = scatterPoints.map(p => p.x);
+        const ys = scatterPoints.map(p => p.y);
         const minX = Math.min(...xs, -0.01);
         const maxX = Math.max(...xs, 0.01);
         const minY = Math.min(...ys, -0.01);
@@ -1337,19 +1358,19 @@ cloudCanvas.addEventListener('dblclick', (e) => {
         const getCanvasY = (y) => pad + ((maxY - y) / (maxY - minY)) * (cloudCanvas.height - 2 * pad);
 
         // Cache min/max counts once outside the loop for performance
-        const dblPcaCounts = pcaPoints.map(p => p.count);
-        const dblPcaMinCount = Math.min(...dblPcaCounts);
-        const dblPcaMaxCount = Math.max(...dblPcaCounts);
+        const dblScatterCounts = scatterPoints.map(p => p.count);
+        const dblScatterMinCount = Math.min(...dblScatterCounts);
+        const dblScatterMaxCount = Math.max(...dblScatterCounts);
 
-        for (let i = pcaPoints.length - 1; i >= 0; i--) { let pt = pcaPoints[i];
+        for (let i = scatterPoints.length - 1; i >= 0; i--) { let pt = scatterPoints[i];
             const px = getCanvasX(pt.x);
             const py = getCanvasY(pt.y);
             const dx = mouseX - px;
             const dy = mouseY - py;
             
             let radius = 10;
-            if (dblPcaMaxCount !== dblPcaMinCount) {
-                radius = 5 + ((pt.count - dblPcaMinCount) / (dblPcaMaxCount - dblPcaMinCount)) * 14;
+            if (dblScatterMaxCount !== dblScatterMinCount) {
+                radius = 5 + ((pt.count - dblScatterMinCount) / (dblScatterMaxCount - dblScatterMinCount)) * 14;
             }
             
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1485,8 +1506,10 @@ exportWordsCsvBtn.addEventListener('click', () => {
     
     let csv = "単語,出現回数,特徴度 (TF-IDF),クラスターID\n";
     wordFrequencies.forEach(item => {
-        const pcaPoint = pcaPoints.find(p => p.word === item.text);
-        const clusterId = pcaPoint ? `C${pcaPoint.cluster + 1}` : "-";
+        const scatterPoint = (displayType && displayType.value === 'umap')
+            ? umapPoints.find(p => p.word === item.text)
+            : pcaPoints.find(p => p.word === item.text);
+        const clusterId = scatterPoint ? `C${scatterPoint.cluster + 1}` : "-";
         const escapedWord = item.text.includes('"') ? item.text.replace(/"/g, '""') : item.text;
         csv += `"${escapedWord}",${item.count},${item.tfidf.toFixed(4)},${clusterId}\n`;
     });
@@ -2019,8 +2042,12 @@ function processAndRender() {
             pt.cluster = assignments[i];
             return pt;
         });
+
+        // --- UMAP ANALYSIS & EMBEDDING ---
+        umapPoints = runUMAPAnalysis(pcaWords, X, rawPoints, counts, k);
     } else {
         pcaPoints = [];
+        umapPoints = [];
     }
 
     // --- LDA TOPIC MODELING & AUTOMATIC TOPIC NUMBER SELECTION ---
@@ -2028,6 +2055,183 @@ function processAndRender() {
 
     resizeCanvas();
     updateWordCloud();
+}
+
+// Lightweight Pure-JavaScript UMAP Analysis Engine (k-NN + Fuzzy Simplicial Set + 2D SGD)
+function runUMAPAnalysis(words, rawVectors, pcaInitCoords, counts, kClusters) {
+    if (!words || words.length === 0 || !rawVectors || rawVectors.length === 0) return [];
+    const V = words.length;
+    if (V < 2) {
+        return words.map((w, i) => ({ word: w, x: 0, y: 0, count: counts[w] || 1, cluster: 0 }));
+    }
+
+    const kNeighbors = Math.min(15, V - 1);
+    const targetSum = Math.log2(kNeighbors);
+
+    // 1. Calculate Cosine Distance Matrix
+    const dists = Array.from({ length: V }, () => new Float64Array(V));
+    const norms = new Float64Array(V);
+    const M = rawVectors[0].length;
+
+    for (let i = 0; i < V; i++) {
+        let sumSq = 0;
+        for (let m = 0; m < M; m++) sumSq += rawVectors[i][m] * rawVectors[i][m];
+        norms[i] = Math.sqrt(sumSq) || 1e-9;
+    }
+
+    for (let i = 0; i < V; i++) {
+        for (let j = i + 1; j < V; j++) {
+            let dot = 0;
+            for (let m = 0; m < M; m++) dot += rawVectors[i][m] * rawVectors[j][m];
+            const cosSim = dot / (norms[i] * norms[j]);
+            const d = Math.max(0, 1.0 - cosSim);
+            dists[i][j] = d;
+            dists[j][i] = d;
+        }
+    }
+
+    // 2. Compute local rho and sigma for each word
+    const rhos = new Float64Array(V);
+    const sigmas = new Float64Array(V);
+    const knnIndices = [];
+
+    for (let i = 0; i < V; i++) {
+        const neighbors = [];
+        for (let j = 0; j < V; j++) {
+            if (i !== j) neighbors.push({ index: j, dist: dists[i][j] });
+        }
+        neighbors.sort((a, b) => a.dist - b.dist);
+        knnIndices[i] = neighbors.slice(0, kNeighbors).map(n => n.index);
+
+        const rho = neighbors[0] ? neighbors[0].dist : 0;
+        rhos[i] = rho;
+
+        // Binary search for sigma_i
+        let lo = 1e-5;
+        let hi = 100.0;
+        let sigma = 1.0;
+        for (let iter = 0; iter < 40; iter++) {
+            const mid = (lo + hi) / 2;
+            let sum = 0;
+            for (let nIdx = 0; nIdx < kNeighbors; nIdx++) {
+                const d = neighbors[nIdx].dist;
+                sum += Math.exp(-Math.max(0, d - rho) / mid);
+            }
+            if (Math.abs(sum - targetSum) < 1e-5) {
+                sigma = mid;
+                break;
+            }
+            if (sum > targetSum) {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+            sigma = mid;
+        }
+        sigmas[i] = sigma;
+    }
+
+    // 3. Compute High-Dimensional Fuzzy Simplicial Set (P matrix)
+    const P = Array.from({ length: V }, () => new Float64Array(V));
+    for (let i = 0; i < V; i++) {
+        const rho = rhos[i];
+        const sigma = sigmas[i];
+        knnIndices[i].forEach(j => {
+            const d = dists[i][j];
+            const p_ji = Math.exp(-Math.max(0, d - rho) / sigma);
+            P[i][j] = p_ji;
+        });
+    }
+
+    // Symmetrize P: P_ij = p_ij + p_ji - p_ij * p_ji
+    for (let i = 0; i < V; i++) {
+        for (let j = i + 1; j < V; j++) {
+            const p1 = P[i][j];
+            const p2 = P[j][i];
+            const sym = p1 + p2 - p1 * p2;
+            P[i][j] = sym;
+            P[j][i] = sym;
+        }
+    }
+
+    // 4. Low-Dimensional 2D Coordinates Initialization (using PCA scaled coordinates)
+    const Y = Array.from({ length: V }, () => new Float64Array(2));
+    if (pcaInitCoords && pcaInitCoords.length === V) {
+        const xs = pcaInitCoords.map(p => p.x);
+        const ys = pcaInitCoords.map(p => p.y);
+        const maxX = Math.max(...xs.map(Math.abs)) || 1;
+        const maxY = Math.max(...ys.map(Math.abs)) || 1;
+        for (let i = 0; i < V; i++) {
+            Y[i][0] = (pcaInitCoords[i].x / maxX) * 4.0;
+            Y[i][1] = (pcaInitCoords[i].y / maxY) * 4.0;
+        }
+    } else {
+        for (let i = 0; i < V; i++) {
+            Y[i][0] = Math.cos((i / V) * 2 * Math.PI) * 2.0;
+            Y[i][1] = Math.sin((i / V) * 2 * Math.PI) * 2.0;
+        }
+    }
+
+    // 5. Low-Dimensional Optimization (UMAP SGD)
+    const nEpochs = 120;
+    const a = 1.577;
+    const b = 0.895;
+    const alpha0 = 1.0;
+
+    for (let epoch = 0; epoch < nEpochs; epoch++) {
+        const lr = alpha0 * (1.0 - epoch / nEpochs);
+        const grads = Array.from({ length: V }, () => new Float64Array(2));
+
+        for (let i = 0; i < V; i++) {
+            for (let j = 0; j < V; j++) {
+                if (i === j) continue;
+                const dx = Y[i][0] - Y[j][0];
+                const dy = Y[i][1] - Y[j][1];
+                const d2 = dx * dx + dy * dy + 1e-6;
+
+                const pij = P[i][j];
+
+                // Attractive force along graph edges
+                if (pij > 0) {
+                    const factorAttr = -2.0 * b * Math.pow(d2, b - 1.0) / (1.0 + a * Math.pow(d2, b)) * pij;
+                    grads[i][0] += factorAttr * dx;
+                    grads[i][1] += factorAttr * dy;
+                }
+
+                // Repulsive force to keep clusters apart
+                const factorRep = (2.0 * b / ((0.001 + d2) * (1.0 + a * Math.pow(d2, b)))) * (1.0 - pij) * 0.1;
+                grads[i][0] += factorRep * dx;
+                grads[i][1] += factorRep * dy;
+            }
+        }
+
+        // Apply gradients with bounds clipping
+        for (let i = 0; i < V; i++) {
+            const gx = Math.max(-4.0, Math.min(4.0, grads[i][0]));
+            const gy = Math.max(-4.0, Math.min(4.0, grads[i][1]));
+            Y[i][0] += lr * gx;
+            Y[i][1] += lr * gy;
+        }
+    }
+
+    // Center coordinates around (0, 0)
+    let meanX = 0, meanY = 0;
+    for (let i = 0; i < V; i++) { meanX += Y[i][0]; meanY += Y[i][1]; }
+    meanX /= V; meanY /= V;
+    for (let i = 0; i < V; i++) { Y[i][0] -= meanX; Y[i][1] -= meanY; }
+
+    const rawUmapPoints = words.map((w, i) => ({
+        word: w,
+        x: Y[i][0],
+        y: Y[i][1],
+        count: counts[w] || 1
+    }));
+
+    const assignments = runKMeans(rawUmapPoints, kClusters);
+    return rawUmapPoints.map((pt, i) => {
+        pt.cluster = assignments[i];
+        return pt;
+    });
 }
 
 // LDA Topic Modeling with Automatic Optimal K Selection (Ultra-Optimized)
@@ -2968,6 +3172,246 @@ function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThem
     drawPCALegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, k, selectedTheme, selectedFont);
 }
 
+// Helper to draw UMAP Legend on any canvas
+function drawUMAPLegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, maxCount, k, selectedTheme, selectedFont) {
+    const scaleFactor = canvasWidth / 1024;
+    const x = 20 * scaleFactor;
+    const y = canvasHeight - 75 * scaleFactor;
+    
+    ctx.save();
+    
+    ctx.fillStyle = isDarkTheme ? 'rgba(15, 23, 42, 0.55)' : 'rgba(255, 255, 255, 0.65)';
+    ctx.strokeStyle = isDarkTheme ? 'rgba(15, 23, 42, 0.08)' : 'rgba(0, 0, 0, 0.08)';
+    ctx.lineWidth = 1 * scaleFactor;
+    
+    const w = 210 * scaleFactor;
+    const h = 56 * scaleFactor;
+    const r = 4 * scaleFactor;
+    
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = isDarkTheme ? '#9CA3AF' : '#4B5563';
+    ctx.font = `bold ${Math.round(9.5 * scaleFactor)}px ${selectedFont}`;
+    ctx.fillText("凡例 (UMAP Legend)", x + 10 * scaleFactor, y + 6 * scaleFactor);
+    
+    ctx.font = `${Math.round(8.5 * scaleFactor)}px ${selectedFont}`;
+    ctx.fillStyle = isDarkTheme ? '#9CA3AF' : '#4B5563';
+    
+    const cY = y + 24 * scaleFactor;
+    ctx.fillText("円:出現回数", x + 10 * scaleFactor, cY - 4 * scaleFactor);
+    
+    const rSmall = 3 * scaleFactor;
+    const rLarge = 7 * scaleFactor;
+    
+    ctx.beginPath();
+    ctx.arc(x + 72 * scaleFactor, cY, rSmall, 0, 2 * Math.PI);
+    ctx.fillStyle = isDarkTheme ? '#4B5563' : '#9CA3AF';
+    ctx.fill();
+    ctx.fillText(`${minCount}回`, x + 82 * scaleFactor, cY - 4 * scaleFactor);
+    
+    ctx.beginPath();
+    ctx.arc(x + 104 * scaleFactor, cY, rLarge, 0, 2 * Math.PI);
+    ctx.fillStyle = isDarkTheme ? '#4B5563' : '#9CA3AF';
+    ctx.fill();
+    ctx.fillText(`${maxCount}回`, x + 115 * scaleFactor, cY - 4 * scaleFactor);
+    
+    const dY = y + 42 * scaleFactor;
+    ctx.fillText("色:クラスタ (C1-C8)", x + 10 * scaleFactor, dY - 4 * scaleFactor);
+    
+    const spacing = 10 * scaleFactor;
+    for (let i = 0; i < Math.min(k, 8); i++) {
+        const color = getNetworkNodeColor(selectedTheme, i, isDarkTheme);
+        const dotX = x + 115 * scaleFactor + i * spacing;
+        
+        ctx.beginPath();
+        ctx.arc(dotX, dY, 3 * scaleFactor, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+    }
+    
+    ctx.restore();
+}
+
+// Helper to draw UMAP Scatter Plot on any canvas
+function drawUMAPOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkTheme) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.fillStyle = isDarkTheme ? '#0B0F19' : '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    if (!points || points.length === 0) return;
+    
+    const scaleFactor = canvas.width / 1024;
+    const padding = 100 * scaleFactor;
+    
+    const xs = points.map(p => p.x);
+    const ys = points.map(p => p.y);
+    const minX = Math.min(...xs, -0.01);
+    const maxX = Math.max(...xs, 0.01);
+    const minY = Math.min(...ys, -0.01);
+    const maxY = Math.max(...ys, 0.01);
+    
+    const scaleX = (x) => padding + ((x - minX) / (maxX - minX)) * (canvas.width - 2 * padding);
+    const scaleY = (y) => padding + ((maxY - y) / (maxY - minY)) * (canvas.height - 2 * padding);
+    
+    const zeroX = scaleX(0);
+    const zeroY = scaleY(0);
+    
+    ctx.save();
+    ctx.strokeStyle = isDarkTheme ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.09)';
+    ctx.lineWidth = 1 * scaleFactor;
+    
+    // Grid lines
+    const gridSteps = 5;
+    for (let i = 0; i <= gridSteps; i++) {
+        const gridX = padding + (i / gridSteps) * (canvas.width - 2 * padding);
+        const gridY = padding + (i / gridSteps) * (canvas.height - 2 * padding);
+        
+        ctx.beginPath();
+        ctx.moveTo(gridX, padding);
+        ctx.lineTo(gridX, canvas.height - padding);
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.moveTo(padding, gridY);
+        ctx.lineTo(canvas.width - padding, gridY);
+        ctx.stroke();
+    }
+    
+    // UMAP Axes
+    ctx.strokeStyle = isDarkTheme ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.28)';
+    ctx.lineWidth = 1.8 * scaleFactor;
+    
+    // X-axis
+    ctx.beginPath();
+    ctx.moveTo(padding - 20 * scaleFactor, zeroY);
+    ctx.lineTo(canvas.width - padding + 20 * scaleFactor, zeroY);
+    ctx.stroke();
+    
+    // Y-axis
+    ctx.beginPath();
+    ctx.moveTo(zeroX, padding - 20 * scaleFactor);
+    ctx.lineTo(zeroX, canvas.height - padding + 20 * scaleFactor);
+    ctx.stroke();
+    
+    // Axis labels
+    ctx.fillStyle = isDarkTheme ? '#9CA3AF' : '#4B5563';
+    ctx.font = `bold ${Math.round(11 * scaleFactor)}px ${selectedFont}`;
+    ctx.textAlign = 'right';
+    ctx.fillText('UMAP-1 (多様体射影)', canvas.width - padding + 15 * scaleFactor, zeroY + 16 * scaleFactor);
+    ctx.textAlign = 'left';
+    ctx.fillText('UMAP-2 (多様体射影)', zeroX + 8 * scaleFactor, padding - 8 * scaleFactor);
+
+    // Note on distances
+    ctx.font = `${Math.round(9 * scaleFactor)}px ${selectedFont}`;
+    ctx.fillStyle = isDarkTheme ? 'rgba(156, 163, 175, 0.7)' : 'rgba(75, 85, 99, 0.7)';
+    ctx.fillText('※ 近くに集まる語ほど同じ文脈で共起する関係にあります', zeroX + 8 * scaleFactor, padding + 8 * scaleFactor);
+    
+    ctx.restore();
+    
+    const counts = points.map(p => p.count);
+    const minCount = Math.min(...counts);
+    const maxCount = Math.max(...counts);
+    
+    const k = parseInt(clusterCount?.value) || 3;
+    const clusterPoints = Array.from({ length: k }, () => []);
+    points.forEach(p => {
+        if (p.cluster >= 0 && p.cluster < k) {
+            clusterPoints[p.cluster].push(p);
+        }
+    });
+    
+    // Draw shaded cluster background boundaries
+    ctx.save();
+    clusterPoints.forEach((cPts, cIdx) => {
+        if (cPts.length === 0) return;
+        const color = getNetworkNodeColor(selectedTheme, cIdx, isDarkTheme);
+        
+        const sumX = cPts.reduce((sum, p) => sum + p.x, 0);
+        const sumY = cPts.reduce((sum, p) => sum + p.y, 0);
+        const avgX = sumX / cPts.length;
+        const avgY = sumY / cPts.length;
+        
+        const canvasAvgX = scaleX(avgX);
+        const canvasAvgY = scaleY(avgY);
+        
+        let maxDist = 20 * scaleFactor;
+        cPts.forEach(p => {
+            const dx = scaleX(p.x) - canvasAvgX;
+            const dy = scaleY(p.y) - canvasAvgY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > maxDist) maxDist = dist;
+        });
+        
+        ctx.beginPath();
+        ctx.arc(canvasAvgX, canvasAvgY, maxDist + 22 * scaleFactor, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.08;
+        ctx.fill();
+        
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1 * scaleFactor;
+        ctx.globalAlpha = 0.18;
+        ctx.stroke();
+    });
+    ctx.restore();
+    
+    // Draw single word points and labels
+    points.forEach(p => {
+        const px = scaleX(p.x);
+        const py = scaleY(p.y);
+        
+        let radius = 10;
+        if (maxCount !== minCount) {
+            radius = 5 + ((p.count - minCount) / (maxCount - minCount)) * 14;
+        }
+        
+        const color = getNetworkNodeColor(selectedTheme, p.cluster, isDarkTheme);
+        
+        ctx.beginPath();
+        ctx.arc(px, py, radius * scaleFactor, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+        
+        ctx.strokeStyle = selectedTheme === 'pure-bw' 
+            ? '#000000' 
+            : (isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.3)');
+        ctx.lineWidth = 1.5 * scaleFactor;
+        ctx.stroke();
+        
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.font = `bold ${Math.round(11 * scaleFactor)}px ${selectedFont}`;
+        
+        const labelY = py - (radius * scaleFactor + 4 * scaleFactor);
+        
+        ctx.strokeStyle = isDarkTheme ? '#0B0F19' : '#FFFFFF';
+        ctx.lineWidth = 3.5 * scaleFactor;
+        ctx.lineJoin = 'round';
+        ctx.strokeText(p.word, px, labelY);
+        
+        ctx.fillStyle = isDarkTheme ? '#F3F4F6' : '#111111';
+        ctx.fillText(p.word, px, labelY);
+    });
+
+    drawUMAPLegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, k, selectedTheme, selectedFont);
+}
+
 // 5. Draw Word Cloud, Canvas Bar Chart, Co-occurrence Network, or PCA Scatter Plot
 function updateWordCloud() {
     if (typeof tooltip !== 'undefined' && tooltip) {
@@ -3297,6 +3741,13 @@ function updateWordCloud() {
         
         const selectedFont = fontSelect.value;
         drawPCAOnCanvas(cloudCanvas, pcaPoints, selectedTheme, selectedFont, isDarkTheme);
+    } else if (currentDisplayType === 'umap') {
+        cloudCanvas.style.display = 'block';
+        chartContainer.style.display = 'none';
+        if (ldaContainer) ldaContainer.style.display = 'none';
+        
+        const selectedFont = fontSelect.value;
+        drawUMAPOnCanvas(cloudCanvas, umapPoints, selectedTheme, selectedFont, isDarkTheme);
     } else if (currentDisplayType === 'topic-lda') {
         cloudCanvas.style.display = 'none';
         chartContainer.style.display = 'none';
@@ -3421,8 +3872,26 @@ function renderAnalysisSummary(mode, filteredList) {
             <span style="color:var(--text-muted);">💡 点が離れているほど、他と違う文脈で使われる語です。共起ネットワークと合わせて見ると理解が深まります。</span>`;
         nextHtml = `
             <b>👉 次のステップ：</b>
+            意味的に近い単語のまとまり（島）をよりくっきりと見るには
+            <span style="color:var(--accent-blue);cursor:pointer;text-decoration:underline;" onclick="document.getElementById('display-type').value='umap';document.getElementById('display-type').dispatchEvent(new Event('change'));">UMAP散布図</span>
+            もお試しください。`;
+
+    } else if (mode === 'umap') {
+        // ① UMAP用コメント
+        const k = parseInt(clusterCount?.value) || 3;
+        commentHtml = `
+            <b>📊 この結果から読み取れること：</b><br>
+            非線形次元圧縮（UMAP）により、<b>同じ文脈で強く結びつく単語群が「島（クラスタ）」として凝縮</b>されています。
+            ${k}色のグループに自動分類されています。<br>
+            島と島が離れているほど、全く異なる場面や話題で使われていることを示します。<br>
+            <span style="color:var(--text-muted);">💡 ギュッと集まっている単語群は、密接に関連したサブテーマです。語をクリックしてKWIC（文脈）を確認してみましょう。</span>`;
+        nextHtml = `
+            <b>👉 次のステップ：</b>
+            単語間の直接の接続線を確認したい場合は
+            <span style="color:var(--accent-blue);cursor:pointer;text-decoration:underline;" onclick="document.getElementById('display-type').value='network';document.getElementById('display-type').dispatchEvent(new Event('change'));">共起ネットワーク</span>
+            を、文書単位の話題比率を見るには
             <span style="color:var(--accent-blue);cursor:pointer;text-decoration:underline;" onclick="document.getElementById('display-type').value='topic-lda';document.getElementById('display-type').dispatchEvent(new Event('change'));">トピック分析(LDA)</span>
-            で、文書単位のテーマ分布を確認できます。`;
+            をお試しください。`;
 
     } else if (mode === 'topic-lda') {
         // ① LDA用コメント
@@ -3704,6 +4173,16 @@ downloadBtn.addEventListener('click', async () => {
 
             const image = exportCanvas.toDataURL("image/png");
             saveImageFile(image, 'pca_scatter.png');
+        } else if (currentMode === 'umap') {
+            const exportCanvas = document.createElement('canvas');
+            exportCanvas.width = targetSize.w;
+            exportCanvas.height = targetSize.h;
+
+            const selectedFont = fontSelect.value;
+            drawUMAPOnCanvas(exportCanvas, umapPoints, selectedTheme, selectedFont, isDarkTheme);
+
+            const image = exportCanvas.toDataURL("image/png");
+            saveImageFile(image, 'umap_scatter.png');
         } else if (currentMode === 'topic-lda') {
             if (!ldaContainer) return;
             
