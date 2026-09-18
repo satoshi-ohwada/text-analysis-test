@@ -71,6 +71,9 @@ const displayType = document.getElementById('display-type');
 const methodDescription = document.getElementById('method-description');
 const clusterCountGroup = document.getElementById('cluster-count-group');
 const clusterCount = document.getElementById('cluster-count');
+const autoClusterBadge = document.getElementById('auto-cluster-badge');
+const btnResetCluster = document.getElementById('btn-reset-cluster');
+const lastAutoClusterCount = { pca: 3, umap: 3 };
 
 // Compound Words Elements
 const newCompoundWordInput = document.getElementById('new-compound-word');
@@ -969,21 +972,84 @@ function updateClusterCountGroupVisibility() {
     }
 }
 
+// Update cluster count badge reflecting whether current k matches auto-optimal k
+function updateClusterCountBadge() {
+    if (!autoClusterBadge || !clusterCount) return;
+    const mode = (displayType && displayType.value === 'umap') ? 'umap' : 'pca';
+    const optK = lastAutoClusterCount[mode] || 3;
+    const currentK = parseInt(clusterCount.value) || 3;
+
+    if (currentK === optK) {
+        autoClusterBadge.textContent = `自動判定: ${optK}（推奨）`;
+        autoClusterBadge.style.color = 'var(--accent-blue)';
+        autoClusterBadge.style.background = 'rgba(59, 130, 246, 0.1)';
+        if (btnResetCluster) btnResetCluster.style.opacity = '0.6';
+    } else {
+        autoClusterBadge.textContent = `手動調整中（最適判定: ${optK}）`;
+        autoClusterBadge.style.color = '#e67e22';
+        autoClusterBadge.style.background = 'rgba(230, 126, 34, 0.12)';
+        if (btnResetCluster) btnResetCluster.style.opacity = '1';
+    }
+}
+
 // Combined displayType change handler: update description/cluster UI AND re-render
 displayType.addEventListener('change', () => {
     updateClusterCountGroupVisibility();
+    if (displayType.value === 'pca' || displayType.value === 'umap') {
+        const mode = displayType.value;
+        const optK = lastAutoClusterCount[mode] || 3;
+        if (clusterCount) {
+            clusterCount.value = optK;
+        }
+        updateClusterCountBadge();
+    }
     if (rawTextData) {
         processAndRender();
     }
 });
 
-// clusterCount slider: only re-draw (no full NLP re-parse)
+// Re-run K-means clustering on existing PCA and UMAP points when clusterCount changes
+function updateClusterAssignments() {
+    const k = parseInt(clusterCount?.value) || 3;
+    if (pcaPoints && pcaPoints.length > 0) {
+        const assignments = runKMeans(pcaPoints, k);
+        pcaPoints.forEach((pt, i) => {
+            pt.cluster = assignments[i];
+        });
+    }
+    if (umapPoints && umapPoints.length > 0) {
+        const assignments = runKMeans(umapPoints, k);
+        umapPoints.forEach((pt, i) => {
+            pt.cluster = assignments[i];
+        });
+    }
+}
+
+// clusterCount input: instantly re-cluster scatter points and re-render
 if (clusterCount) {
-    clusterCount.addEventListener('change', () => {
-        if (rawTextData) updateWordCloud();
-    });
-    clusterCount.addEventListener('input', () => {
-        if (rawTextData) updateWordCloud();
+    const handleClusterChange = () => {
+        if (!rawTextData) return;
+        updateClusterCountBadge();
+        updateClusterAssignments();
+        updateWordCloud();
+    };
+    clusterCount.addEventListener('change', handleClusterChange);
+    clusterCount.addEventListener('input', handleClusterChange);
+}
+
+// Reset cluster count button to restore auto-detected optimal k
+if (btnResetCluster) {
+    btnResetCluster.addEventListener('click', () => {
+        const mode = (displayType && displayType.value === 'umap') ? 'umap' : 'pca';
+        const optK = lastAutoClusterCount[mode] || 3;
+        if (clusterCount) {
+            clusterCount.value = optK;
+        }
+        updateClusterCountBadge();
+        if (rawTextData) {
+            updateClusterAssignments();
+            updateWordCloud();
+        }
     });
 }
 
@@ -1482,6 +1548,108 @@ function runKMeans(points, k, nRuns = 5) {
     }
 
     return bestAssignments;
+}
+
+// Compute average silhouette score for 2D scatter points with cluster assignments
+function calculateSilhouetteScore(points, assignments, k) {
+    const n = points.length;
+    if (n <= 1 || k <= 1 || k >= n) return 0;
+
+    const clusters = Array.from({ length: k }, () => []);
+    for (let i = 0; i < n; i++) {
+        const c = assignments[i];
+        if (c >= 0 && c < k) {
+            clusters[c].push(i);
+        }
+    }
+
+    // If any cluster is empty, penalty score
+    for (let c = 0; c < k; c++) {
+        if (clusters[c].length === 0) return -1;
+    }
+
+    let totalSilhouette = 0;
+
+    for (let i = 0; i < n; i++) {
+        const myCluster = assignments[i];
+        const myClusterPoints = clusters[myCluster];
+
+        // 1. Calculate a(i): average distance to points in same cluster
+        let a = 0;
+        if (myClusterPoints.length > 1) {
+            let sumDist = 0;
+            const pi = points[i];
+            for (let idx = 0; idx < myClusterPoints.length; idx++) {
+                const j = myClusterPoints[idx];
+                if (j !== i) {
+                    const dx = pi.x - points[j].x;
+                    const dy = pi.y - points[j].y;
+                    sumDist += Math.sqrt(dx * dx + dy * dy);
+                }
+            }
+            a = sumDist / (myClusterPoints.length - 1);
+        } else {
+            totalSilhouette += 0;
+            continue;
+        }
+
+        // 2. Calculate b(i): min average distance to points in other clusters
+        let b = Infinity;
+        const pi = points[i];
+        for (let c = 0; c < k; c++) {
+            if (c === myCluster) continue;
+            const otherClusterPoints = clusters[c];
+            if (otherClusterPoints.length === 0) continue;
+
+            let sumDist = 0;
+            for (let idx = 0; idx < otherClusterPoints.length; idx++) {
+                const j = otherClusterPoints[idx];
+                const dx = pi.x - points[j].x;
+                const dy = pi.y - points[j].y;
+                sumDist += Math.sqrt(dx * dx + dy * dy);
+            }
+            const avgDist = sumDist / otherClusterPoints.length;
+            if (avgDist < b) {
+                b = avgDist;
+            }
+        }
+
+        const maxAB = Math.max(a, b);
+        if (maxAB > 0) {
+            totalSilhouette += (b - a) / maxAB;
+        }
+    }
+
+    return totalSilhouette / n;
+}
+
+// Find optimal cluster count using Silhouette Analysis
+function findOptimalClusterCount(points, minK = 2, maxK = 6) {
+    const n = points ? points.length : 0;
+    if (n < 4) return { bestK: 2, bestScore: 0 };
+
+    const actualMaxK = Math.min(maxK, Math.floor(n / 2), 8);
+    if (actualMaxK < minK) return { bestK: minK, bestScore: 0 };
+
+    let bestK = minK;
+    let bestScore = -Infinity;
+
+    for (let k = minK; k <= actualMaxK; k++) {
+        // Average across 3 runs for stability
+        let scoreSum = 0;
+        const trials = 3;
+        for (let t = 0; t < trials; t++) {
+            const assignments = runKMeans(points, k, 3);
+            scoreSum += calculateSilhouetteScore(points, assignments, k);
+        }
+        const avgScore = scoreSum / trials;
+        if (avgScore > bestScore) {
+            bestScore = avgScore;
+            bestK = k;
+        }
+    }
+
+    return { bestK, bestScore };
 }
 
 // CSV Exporter Helper
@@ -2035,16 +2203,37 @@ function processAndRender() {
             });
         }
         
-        const k = parseInt(clusterCount?.value) || 3;
-        const assignments = runKMeans(rawPoints, k);
-        
+        // --- AUTO-DETECT OPTIMAL CLUSTER COUNT VIA SILHOUETTE ANALYSIS ---
+        const optPCA = findOptimalClusterCount(rawPoints);
+        lastAutoClusterCount.pca = optPCA.bestK;
+
+        // --- UMAP ANALYSIS & EMBEDDING ---
+        const rawUmapPoints = runUMAPAnalysis(pcaWords, X, rawPoints, counts);
+        const optUMAP = findOptimalClusterCount(rawUmapPoints);
+        lastAutoClusterCount.umap = optUMAP.bestK;
+
+        // Determine current mode and initial optimal cluster count
+        const currentMode = (displayType && displayType.value === 'umap') ? 'umap' : 'pca';
+        const optimalK = lastAutoClusterCount[currentMode] || 3;
+
+        // Set optimal k as initial value in clusterCount input
+        if (clusterCount) {
+            clusterCount.value = optimalK;
+        }
+        updateClusterCountBadge();
+
+        const activeK = parseInt(clusterCount?.value) || optimalK;
+        const pcaAssignments = runKMeans(rawPoints, activeK);
         pcaPoints = rawPoints.map((pt, i) => {
-            pt.cluster = assignments[i];
+            pt.cluster = pcaAssignments[i];
             return pt;
         });
 
-        // --- UMAP ANALYSIS & EMBEDDING ---
-        umapPoints = runUMAPAnalysis(pcaWords, X, rawPoints, counts, k);
+        const umapAssignments = runKMeans(rawUmapPoints, activeK);
+        umapPoints = rawUmapPoints.map((pt, i) => {
+            pt.cluster = umapAssignments[i];
+            return pt;
+        });
     } else {
         pcaPoints = [];
         umapPoints = [];
@@ -2058,11 +2247,11 @@ function processAndRender() {
 }
 
 // Lightweight Pure-JavaScript UMAP Analysis Engine (k-NN + Fuzzy Simplicial Set + 2D SGD)
-function runUMAPAnalysis(words, rawVectors, pcaInitCoords, counts, kClusters) {
+function runUMAPAnalysis(words, rawVectors, pcaInitCoords, counts) {
     if (!words || words.length === 0 || !rawVectors || rawVectors.length === 0) return [];
     const V = words.length;
     if (V < 2) {
-        return words.map((w, i) => ({ word: w, x: 0, y: 0, count: counts[w] || 1, cluster: 0 }));
+        return words.map((w, i) => ({ word: w, x: 0, y: 0, count: counts[w] || 1 }));
     }
 
     const kNeighbors = Math.min(15, V - 1);
@@ -2227,11 +2416,7 @@ function runUMAPAnalysis(words, rawVectors, pcaInitCoords, counts, kClusters) {
         count: counts[w] || 1
     }));
 
-    const assignments = runKMeans(rawUmapPoints, kClusters);
-    return rawUmapPoints.map((pt, i) => {
-        pt.cluster = assignments[i];
-        return pt;
-    });
+    return rawUmapPoints;
 }
 
 // LDA Topic Modeling with Automatic Optimal K Selection (Ultra-Optimized)
