@@ -96,6 +96,7 @@ const resetStopwordsBtn = document.getElementById('reset-stopwords-btn');
 const exportWordsCsvBtn = document.getElementById('export-words-csv-btn');
 const exportPairsCsvBtn = document.getElementById('export-pairs-csv-btn');
 const relayoutBtn = document.getElementById('relayout-btn');
+const sidebarRelayoutBtn = document.getElementById('sidebar-relayout-btn');
 let isForceRelayout = false;
 
 // Input switcher Elements
@@ -517,7 +518,13 @@ let pendingCsvRows = [];
 
 function cleanCSVField(str) {
     if (!str) return '';
-    return str.trim();
+    let s = str.trim();
+    if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
+        s = s.substring(1, s.length - 1).trim();
+    }
+    // Replace escaped double quotes "" with "
+    s = s.replace(/""/g, '"');
+    return s;
 }
 
 function parseCSVText(text) {
@@ -790,14 +797,9 @@ sampleBtn.addEventListener('click', async () => {
     }
 });
 
-const shouldFullReprocess = () => {
-    const mode = displayType ? displayType.value : 'cloud';
-    return mode === 'network' || mode === 'pca' || mode === 'umap' || mode === 'topic-lda';
-};
-
 minCountRange.addEventListener('input', (e) => {
     minCountVal.innerText = e.target.value;
-    if (shouldFullReprocess()) {
+    if (displayType.value === 'network' || displayType.value === 'pca') {
         if (rawTextData) processAndRender();
     } else {
         updateWordCloud();
@@ -806,7 +808,7 @@ minCountRange.addEventListener('input', (e) => {
 
 maxWordsRange.addEventListener('input', (e) => {
     maxWordsVal.innerText = e.target.value;
-    if (shouldFullReprocess()) {
+    if (displayType.value === 'network' || displayType.value === 'pca') {
         if (rawTextData) processAndRender();
     } else {
         updateWordCloud();
@@ -1742,14 +1744,12 @@ function mergeCompoundsAndSynonyms(tokens, compoundWordsSet, synonymRulesMap) {
             }
             if (combinedStr === cw || combinedStr.replace(/\s+/g, '') === cw.replace(/\s+/g, '')) {
                 // If it's a synonym rule, replace the word with the target. Otherwise keep the compound word.
-                const isSynonym = synonymRulesMap.has(cw);
-                const targetWord = isSynonym ? synonymRulesMap.get(cw) : cw;
-                const pos = isSynonym && tokens[i] ? tokens[i].pos : '名詞';
+                const targetWord = synonymRulesMap.has(cw) ? synonymRulesMap.get(cw) : cw;
                 
                 mergedTokens.push({
                     surface_form: targetWord,
-                    pos: pos,
-                    pos_detail_1: isSynonym ? '同義語' : '複合語',
+                    pos: '名詞', // Force to Noun
+                    pos_detail_1: synonymRulesMap.has(cw) ? '同義語' : '複合語',
                     basic_form: targetWord
                 });
                 i = j;
@@ -1773,9 +1773,12 @@ function mergeConsecutiveNouns(tokens) {
     let merged = [];
     let i = 0;
     
-    const isNounStart = (t) => {
+    const isNounForMerge = (t) => {
         if (!t) return false;
+        // Don't merge over user-defined compound words (act as boundaries)
         if (t.pos_detail_1 === '複合語') return false;
+        
+        // Include Nouns and Prefixes. Exclude non-independent and pronouns.
         if (t.pos === '名詞' || t.pos === '接頭詞') {
             if (t.pos_detail_1 === '非自立' || t.pos_detail_1 === '代名詞' || t.pos_detail_1 === '数' || t.pos_detail_1 === '接尾') {
                 return false;
@@ -1785,26 +1788,13 @@ function mergeConsecutiveNouns(tokens) {
         return false;
     };
 
-    const isNounContinuation = (t) => {
-        if (!t) return false;
-        if (t.pos_detail_1 === '複合語') return false;
-        if (t.pos === '名詞') {
-            // 接尾辞（例: 〜品、〜費、〜的 など）は後続として許可
-            if (t.pos_detail_1 === '非自立' || t.pos_detail_1 === '代名詞' || t.pos_detail_1 === '数') {
-                return false;
-            }
-            return true;
-        }
-        return false;
-    };
-
     while (i < tokens.length) {
         let t = tokens[i];
-        if (isNounStart(t)) {
+        if (isNounForMerge(t)) {
             let j = i + 1;
             let combinedSurface = t.surface_form;
             
-            while (j < tokens.length && isNounContinuation(tokens[j])) {
+            while (j < tokens.length && isNounForMerge(tokens[j])) {
                 combinedSurface += tokens[j].surface_form;
                 j++;
             }
@@ -3624,6 +3614,7 @@ function updateWordCloud() {
         exportWordsCsvBtn.disabled = true;
         exportPairsCsvBtn.disabled = true;
         if (relayoutBtn) relayoutBtn.disabled = true;
+        if (sidebarRelayoutBtn) sidebarRelayoutBtn.disabled = true;
         return;
     }
 
@@ -3632,6 +3623,7 @@ function updateWordCloud() {
     exportWordsCsvBtn.disabled = false;
     exportPairsCsvBtn.disabled = false;
     if (relayoutBtn) relayoutBtn.disabled = false;
+    if (sidebarRelayoutBtn) sidebarRelayoutBtn.disabled = false;
 
     const minCount = parseInt(minCountRange.value);
     const maxWords = parseInt(maxWordsRange.value);
@@ -3657,6 +3649,7 @@ function updateWordCloud() {
         exportWordsCsvBtn.disabled = true;
         exportPairsCsvBtn.disabled = true;
         if (relayoutBtn) relayoutBtn.disabled = true;
+        if (sidebarRelayoutBtn) sidebarRelayoutBtn.disabled = true;
         return;
     }
 
@@ -4088,7 +4081,7 @@ function renderAnalysisSummary(mode, filteredList) {
     } else if (mode === 'topic-lda') {
         // ① LDA用コメント
         if (currentLdaResult) {
-            const k = currentLdaResult.k || (currentLdaResult.topicsData ? currentLdaResult.topicsData.length : '?');
+            const k = currentLdaResult.topics ? currentLdaResult.topics.length : '?';
             const modeRadio = document.querySelector('input[name="lda-topic-mode"]:checked');
             const isManual = modeRadio && modeRadio.value === 'manual';
             commentHtml = `
@@ -4172,7 +4165,6 @@ downloadBtn.addEventListener('click', async () => {
         if (currentMode === 'chart') defaultFilename = 'barchart.png';
         else if (currentMode === 'network') defaultFilename = 'network_diagram.png';
         else if (currentMode === 'pca') defaultFilename = 'pca_scatter.png';
-        else if (currentMode === 'umap') defaultFilename = 'umap_scatter.png';
         else if (currentMode === 'topic-lda') defaultFilename = 'topic_lda.png';
 
         let fileHandle = null;
@@ -4444,8 +4436,7 @@ downloadBtn.addEventListener('click', async () => {
 function triggerRelayout() {
     if (wordFrequencies.length === 0) return;
     isForceRelayout = true;
-    const mode = displayType ? displayType.value : 'cloud';
-    if (mode === 'pca' || mode === 'umap' || mode === 'topic-lda') {
+    if (displayType.value === 'pca') {
         if (rawTextData) processAndRender();
     } else {
         updateWordCloud();
@@ -4455,6 +4446,9 @@ function triggerRelayout() {
 
 if (relayoutBtn) {
     relayoutBtn.addEventListener('click', triggerRelayout);
+}
+if (sidebarRelayoutBtn) {
+    sidebarRelayoutBtn.addEventListener('click', triggerRelayout);
 }
 
 // Run Initialization on Load
@@ -4628,9 +4622,9 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
             kwicNetworkCanvas.width = canvasContainer.clientWidth || 520;
             kwicNetworkCanvas.height = canvasContainer.clientHeight || 250;
             
-            const selectedTheme = colorTheme ? colorTheme.value : 'aurora-light';
-            const isDarkTheme = selectedTheme === 'aurora-dark' || selectedTheme === 'monochrome-dark';
-            const selectedFont = fontSelect ? fontSelect.value : 'sans-serif';
+            const selectedTheme = document.getElementById('color-theme') ? document.getElementById('color-theme').value : 'default';
+            const isDarkTheme = document.documentElement.getAttribute('data-theme') === 'dark';
+            const selectedFont = document.getElementById('font-family') ? document.getElementById('font-family').value : 'sans-serif';
             
             // Build Nodes
             let miniNodes = [{
@@ -4827,26 +4821,27 @@ document.addEventListener('keydown', (e) => {
 // =========================================================================
 // 8. HIERARCHICAL CLUSTERING & SILHOUETTE OPTIMAL K
 // =========================================================================
-function computeHCADistanceMatrix(words, coocCounts, docFreq = currentAnalysisDocFreq) {
+function computeHCADistanceMatrix(words, coocCounts) {
     const n = words.length;
     const dist = Array(n).fill(0).map(() => Array(n).fill(1));
     const wordToIndex = new Map(words.map((w, i) => [w, i]));
     
     // Diagonal is 0
-    for (let i = 0; i < n; i++) dist[i][i] = 0;
+    for(let i = 0; i < n; i++) dist[i][i] = 0;
     
-    Object.entries(coocCounts).forEach(([key, fAB]) => {
+    // Fill from co-occurrences
+    let maxWeight = 0;
+    Object.values(coocCounts).forEach(weight => { if (weight > maxWeight) maxWeight = weight; });
+    if (maxWeight === 0) maxWeight = 1;
+
+    Object.entries(coocCounts).forEach(([key, weight]) => {
         const parts = key.split('|||');
         if (parts.length === 2) {
             const i = wordToIndex.get(parts[0]);
             const j = wordToIndex.get(parts[1]);
             if (i !== undefined && j !== undefined) {
-                const cA = (docFreq && docFreq[parts[0]]) || fAB;
-                const cB = (docFreq && docFreq[parts[1]]) || fAB;
-                const denom = cA + cB - fAB;
-                const jaccard = denom > 0 ? fAB / denom : 0;
-                // Jaccard distance (0 = identical co-occurrence, 1 = no co-occurrence)
-                const d = Math.max(0, 1.0 - jaccard);
+                // Distance = 1 - (weight / maxWeight)
+                const d = 1 - (weight / maxWeight);
                 dist[i][j] = d;
                 dist[j][i] = d;
             }
@@ -4967,11 +4962,11 @@ function computeSilhouetteScore(distMatrix, assignments, k) {
     return sum / n;
 }
 
-function findOptimalWordClusters(words, coocCounts, maxK = 10, docFreq = currentAnalysisDocFreq) {
+function findOptimalWordClusters(words, coocCounts, maxK=10) {
     const n = words.length;
     if (n < 3) return { k: 1, assignments: Array(n).fill(0), bestScore: 0 };
     
-    const distMatrix = computeHCADistanceMatrix(words, coocCounts, docFreq);
+    const distMatrix = computeHCADistanceMatrix(words, coocCounts);
     const maxTestedK = Math.min(maxK, n - 1);
     const history = runWardHCA(distMatrix);
     
