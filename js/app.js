@@ -3046,7 +3046,7 @@ function drawNetworkLegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount
 }
 
 // Helper to draw the Co-occurrence Network on any canvas
-function drawNetworkOnCanvas(canvas, nodes, edges, selectedTheme, selectedFont, isDarkTheme, customScale = null, showLegend = true) {
+function drawNetworkOnCanvas(canvas, nodes, edges, selectedTheme, selectedFont, isDarkTheme, customScale = null, showLegend = true, isKwic = false) {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
@@ -3072,14 +3072,25 @@ function drawNetworkOnCanvas(canvas, nodes, edges, selectedTheme, selectedFont, 
         let thickness = 1.5;
         let opacity = 0.15;
 
-        if (maxWeight > minWeight) {
-            // Relative scaling
-            thickness = 1 + ((edge.weight - minWeight) / (maxWeight - minWeight)) * 6.5;
-            opacity = 0.15 + ((edge.weight - minWeight) / (maxWeight - minWeight)) * 0.7;
+        if (isKwic) {
+            // KWIC確認用のミニネットワーク：繋がりを把握しやすくするため、細くすっきりとした線（1.0〜1.8px）で描画
+            if (maxWeight > minWeight) {
+                thickness = 1.0 + ((edge.weight - minWeight) / (maxWeight - minWeight)) * 0.8;
+                opacity = 0.25 + ((edge.weight - minWeight) / (maxWeight - minWeight)) * 0.25;
+            } else {
+                thickness = 1.0 + (edge.weight * 0.8);
+                opacity = 0.25 + (edge.weight * 0.25);
+            }
         } else {
-            // Absolute scaling fallback for identical weights (0 to 1 range for Jaccard)
-            thickness = 1 + (edge.weight * 6.5);
-            opacity = 0.15 + (edge.weight * 0.7);
+            if (maxWeight > minWeight) {
+                // Relative scaling
+                thickness = 1 + ((edge.weight - minWeight) / (maxWeight - minWeight)) * 6.5;
+                opacity = 0.15 + ((edge.weight - minWeight) / (maxWeight - minWeight)) * 0.7;
+            } else {
+                // Absolute scaling fallback for identical weights (0 to 1 range for Jaccard)
+                thickness = 1 + (edge.weight * 6.5);
+                opacity = 0.15 + (edge.weight * 0.7);
+            }
         }
         
         ctx.strokeStyle = `${strokeColor}${opacity})`;
@@ -4764,7 +4775,7 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
                     }
                 });
                 
-                drawNetworkOnCanvas(kwicNetworkCanvas, miniNodes, miniEdges, selectedTheme, selectedFont, isDarkTheme, 1.0, false);
+                drawNetworkOnCanvas(kwicNetworkCanvas, miniNodes, miniEdges, selectedTheme, selectedFont, isDarkTheme, 1.0, false, true);
                 
                 // Draw special center highlight
                 const ctx = kwicNetworkCanvas.getContext('2d');
