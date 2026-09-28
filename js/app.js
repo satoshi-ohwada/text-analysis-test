@@ -33,6 +33,9 @@ let umapPoints = [];
 // LDA Topic Model State
 let currentLdaResult = null;
 
+// Collocation (2-gram / Phrase) State
+let collocationFrequencies = [];
+
 // Initialize UI Elements
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
@@ -792,7 +795,7 @@ sampleBtn.addEventListener('click', async () => {
 
 const shouldFullReprocess = () => {
     const mode = displayType ? displayType.value : 'cloud';
-    return mode === 'network' || mode === 'pca' || mode === 'umap' || mode === 'topic-lda';
+    return mode === 'network' || mode === 'pca' || mode === 'umap' || mode === 'topic-lda' || mode === 'collocation';
 };
 
 minCountRange.addEventListener('input', (e) => {
@@ -905,6 +908,20 @@ function updateClusterCountGroupVisibility() {
                     <li>「特徴度 (TF-IDF) 順」→ 他のデータと比べてこの回答集に<strong>特有の語</strong>のランキング</li>
                 </ul>
                 <div class="tips-note">💡 上位10語が全体の傾向の中心です。エクセルでも似たことができますが、TF-IDFによる「特有語」の抽出はここならではです。</div>
+            </div>`;
+
+        } else if (type === 'collocation') {
+            descHtml = `
+            <div class="method-title"><span class="method-icon">🔗</span>コロケーション（連語・フレーズランキング）</div>
+            <div class="method-purpose">単語単体ではなく、「名詞＋動詞」「名詞＋形容詞」「複合名詞」など文脈を持った2〜3語の組み合わせ（連語）を集計してランキング表示します。</div>
+            <div class="reading-tips">
+                <div class="tips-title">📌 読み方のポイント</div>
+                <ul class="tips-list">
+                    <li><strong>棒の長さ</strong> = そのフレーズが出現した回数の多さ</li>
+                    <li>「ログイン できない」「画面 が 見づらい」など、<strong>不満や要望の具体的な内容</strong>がフレーズ単位で分かります</li>
+                    <li><strong>フレーズをクリック</strong>すると、そのフレーズが使われている文脈（KWIC）を確認できます</li>
+                </ul>
+                <div class="tips-note">💡 単語単体（1-gram）だと「画面」「対応」など曖昧な場合でも、連語（2-gram）を見ることで「何がどうなのか」という要約が一目で把握できます。</div>
             </div>`;
 
         } else if (type === 'network') {
@@ -1108,15 +1125,15 @@ cloudCanvas.addEventListener('mousemove', (e) => {
     const mouseX = (e.clientX - rect.left) * scaleX;
     const mouseY = (e.clientY - rect.top) * scaleY;
 
-    if (currentMode === 'chart') {
+    if (currentMode === 'chart' || currentMode === 'collocation') {
         const scaleFactor = cloudCanvas.width / 1024;
         const topMargin = 60 * scaleFactor;
         const bottomMargin = 40 * scaleFactor;
         const minCount = parseInt(minCountRange.value);
         const maxWords = parseInt(maxWordsRange.value);
-        const filteredList = wordFrequencies
-            .filter(item => item.count >= minCount)
-            .slice(0, Math.min(20, maxWords));
+        const filteredList = (currentMode === 'collocation')
+            ? collocationFrequencies.filter(item => item.count >= minCount).slice(0, 20)
+            : wordFrequencies.filter(item => item.count >= minCount).slice(0, Math.min(20, maxWords));
 
         if (filteredList.length === 0) return;
 
@@ -1136,14 +1153,18 @@ cloudCanvas.addEventListener('mousemove', (e) => {
         if (hoveredIndex !== -1) {
             const item = filteredList[hoveredIndex];
             const rankingMethod = document.getElementById('ranking-method').value;
-            const valDisplay = rankingMethod === 'tfidf'
+            const valDisplay = (rankingMethod === 'tfidf' && item.tfidf !== undefined && currentMode !== 'collocation')
                 ? `出現回数: ${item.count}回<br>特徴度 (TF-IDF): ${item.tfidf.toFixed(2)}`
                 : `出現回数: ${item.count}回`;
+
+            const actionTip = (currentMode === 'collocation')
+                ? `<small style="color: var(--accent-blue)">クリックで用例 (KWIC) を表示</small>`
+                : `<small style="color: var(--text-muted)">クリックで用例表示 / ダブルクリックで除外</small>`;
 
             tooltip.style.display = 'block';
             tooltip.style.left = `${e.clientX - canvasContainer.getBoundingClientRect().left + 15}px`;
             tooltip.style.top = `${e.clientY - canvasContainer.getBoundingClientRect().top + 15}px`;
-            tooltip.innerHTML = `<strong>${item.text}</strong><br>${valDisplay}<br><small style="color: var(--text-muted)">ダブルクリックで除外</small>`;
+            tooltip.innerHTML = `<strong>${item.text}</strong><br>${valDisplay}<br>${actionTip}`;
             cloudCanvas.style.cursor = 'pointer';
         } else {
             tooltip.style.display = 'none';
@@ -1266,15 +1287,15 @@ cloudCanvas.addEventListener('click', (e) => {
     let clickedWord = null;
     let clickedCount = 0;
 
-    if (currentMode === 'chart') {
+    if (currentMode === 'chart' || currentMode === 'collocation') {
         const scaleFactor = cloudCanvas.width / 1024;
         const topMargin = 60 * scaleFactor;
         const bottomMargin = 40 * scaleFactor;
         const minCount = parseInt(minCountRange.value);
         const maxWords = parseInt(maxWordsRange.value);
-        const filteredList = wordFrequencies
-            .filter(item => item.count >= minCount)
-            .slice(0, Math.min(20, maxWords));
+        const filteredList = (currentMode === 'collocation')
+            ? collocationFrequencies.filter(item => item.count >= minCount).slice(0, 20)
+            : wordFrequencies.filter(item => item.count >= minCount).slice(0, Math.min(20, maxWords));
 
         if (filteredList.length === 0) return;
 
@@ -1668,6 +1689,17 @@ function downloadCSV(filename, csvContent) {
 
 // Instantly download words list using cached counts (fixed POS filter bug)
 exportWordsCsvBtn.addEventListener('click', () => {
+    if (displayType && displayType.value === 'collocation') {
+        if (collocationFrequencies.length === 0) return;
+        let csv = "連語・フレーズ,出現回数,出現回答数\n";
+        collocationFrequencies.forEach(item => {
+            const escaped = item.text.includes('"') ? item.text.replace(/"/g, '""') : item.text;
+            csv += `"${escaped}",${item.count},${item.docCount || item.count}\n`;
+        });
+        downloadCSV("collocation_metrics.csv", csv);
+        return;
+    }
+
     if (wordFrequencies.length === 0) return;
     
     let csv = "単語,出現回数,特徴度 (TF-IDF),クラスターID\n";
@@ -1904,6 +1936,9 @@ function processAndRender() {
     currentAnalysisCounts = counts;
     currentAnalysisCoocCounts = coocCounts;
     currentAnalysisDocFreq = docFreq; // Needed for correct Jaccard in CSV export
+
+    // Extract collocations (2-gram / phrases)
+    collocationFrequencies = extractCollocations(globalAnalyzedLines);
 
     const rankingMethod = document.getElementById('ranking-method').value;
 
@@ -2868,8 +2903,128 @@ function getColorScheme(theme, isDarkTheme = false) {
     };
 }
 
+// =========================================================================
+// COLLOCATION (2-GRAM / PHRASE) EXTRACTION
+// =========================================================================
+function isValidCollocationNoun(token) {
+    if (!token || token.pos !== '名詞') return false;
+    const detail = token.pos_detail_1;
+    if (detail === '数' || detail === '非自立' || detail === '代名詞' || detail === '接尾') return false;
+    const word = token.surface_form.trim();
+    if (!word || (word.length === 1 && /^[ぁ-んァ-ヶa-zA-Z0-9]$/.test(word))) return false;
+    if (/^[0-9０-９\s\.\,\-\_\:\;]+$/.test(word)) return false;
+    if (defaultStopWordsSet.has(word) || defaultStopWordsSet.has(word.toLowerCase())) return false;
+    if (customStopWords.has(word) || customStopWords.has(word.toLowerCase())) return false;
+    return true;
+}
+
+function isValidPredicate(token) {
+    if (!token) return false;
+    if (token.pos !== '動詞' && token.pos !== '形容詞') return false;
+    const word = (token.basic_form && token.basic_form !== '*') ? token.basic_form : token.surface_form;
+    const trimmed = word.trim();
+    if (!trimmed || (trimmed.length === 1 && /^[ぁ-んァ-ヶ]$/.test(trimmed))) return false;
+    if (['する', 'ある', 'いる', 'なる', 'れる', 'られる', 'れる', 'せる'].includes(trimmed)) return false;
+    if (defaultStopWordsSet.has(trimmed) || customStopWords.has(trimmed)) return false;
+    return true;
+}
+
+function extractCollocations(analyzedLines) {
+    const counts = {};
+    const docCounts = {};
+
+    analyzedLines.forEach(originalTokens => {
+        if (!originalTokens || originalTokens.length === 0) return;
+        
+        let tokens = mergeCompoundsAndSynonyms(originalTokens, customCompoundWords, customSynonymRules);
+        const len = tokens.length;
+        const seenInLine = new Set();
+
+        for (let i = 0; i < len; i++) {
+            const t1 = tokens[i];
+            let phrase = null;
+
+            // パターン1: 名詞 + 名詞（複合名詞・名詞連続）
+            if (i < len - 1) {
+                const t2 = tokens[i + 1];
+                if (isValidCollocationNoun(t1) && isValidCollocationNoun(t2)) {
+                    phrase = `${t1.surface_form} ${t2.surface_form}`;
+                }
+            }
+
+            // パターン2: 名詞 + 助詞 + (動詞 or 形容詞)
+            if (!phrase && i < len - 2) {
+                const t2 = tokens[i + 1];
+                const t3 = tokens[i + 2];
+                const validParticles = ['が', 'を', 'に', 'は', 'で', 'と', 'も', 'へ', 'より', 'から'];
+                if (isValidCollocationNoun(t1) && t2.pos === '助詞' && validParticles.includes(t2.surface_form) && isValidPredicate(t3)) {
+                    let pred = (t3.basic_form && t3.basic_form !== '*') ? t3.basic_form : t3.surface_form;
+                    if (i < len - 3) {
+                        const t4 = tokens[i + 3];
+                        if (t4 && (t4.surface_form === 'ない' || t4.basic_form === 'ない' || t4.surface_form === 'ん')) {
+                            pred += 'ない';
+                        }
+                    }
+                    phrase = `${t1.surface_form} ${t2.surface_form} ${pred}`;
+                }
+            }
+
+            // パターン3: サ変名詞/動詞 + (できる/できない/やすい/にくい/づらい)
+            if (!phrase && i < len - 1) {
+                const t2 = tokens[i + 1];
+                const t1Word = (t1.basic_form && t1.basic_form !== '*') ? t1.basic_form : t1.surface_form;
+                if ((t1.pos === '名詞' || t1.pos === '動詞') && !defaultStopWordsSet.has(t1Word) && !customStopWords.has(t1Word) && t1Word.length > 1) {
+                    const s2 = t2.surface_form;
+                    if (s2.includes('でき') || s2 === 'やすい' || s2 === 'にくい' || s2 === 'づらい') {
+                        let suf = (t2.basic_form && t2.basic_form !== '*') ? t2.basic_form : s2;
+                        if (i < len - 2) {
+                            const t3 = tokens[i + 2];
+                            if (t3 && (t3.surface_form === 'ない' || t3.basic_form === 'ない')) {
+                                suf += 'ない';
+                            }
+                        }
+                        phrase = `${t1.surface_form} ${suf}`;
+                    }
+                }
+            }
+
+            // パターン4: 形容詞 + 名詞
+            if (!phrase && i < len - 1) {
+                const t2 = tokens[i + 1];
+                if (t1.pos === '形容詞' && isValidCollocationNoun(t2)) {
+                    const adj = (t1.basic_form && t1.basic_form !== '*') ? t1.basic_form : t1.surface_form;
+                    if (!['ない', 'よい', 'いい'].includes(adj)) {
+                        phrase = `${adj} ${t2.surface_form}`;
+                    }
+                }
+            }
+
+            if (phrase) {
+                counts[phrase] = (counts[phrase] || 0) + 1;
+                seenInLine.add(phrase);
+            }
+        }
+
+        seenInLine.forEach(ph => {
+            docCounts[ph] = (docCounts[ph] || 0) + 1;
+        });
+    });
+
+    return Object.entries(counts)
+        .map(([text, count]) => ({
+            text: text,
+            count: count,
+            docCount: docCounts[text] || count,
+            tfidf: count
+        }))
+        .sort((a, b) => {
+            if (b.count !== a.count) return b.count - a.count;
+            return a.text.localeCompare(b.text, 'ja');
+        });
+}
+
 // Helper to draw the bar chart on any canvas
-function drawBarChartOnCanvas(canvas, list, rankingMethod, selectedTheme, selectedFont, isDarkTheme) {
+function drawBarChartOnCanvas(canvas, list, rankingMethod, selectedTheme, selectedFont, isDarkTheme, mode = 'word') {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
@@ -2878,14 +3033,15 @@ function drawBarChartOnCanvas(canvas, list, rankingMethod, selectedTheme, select
     
     if (list.length === 0) return;
     
-    const getValue = item => rankingMethod === 'tfidf' ? item.tfidf : item.count;
+    const getValue = item => (rankingMethod === 'tfidf' && item.tfidf !== undefined && mode !== 'collocation') ? item.tfidf : item.count;
     const maxVal = Math.max(...list.map(getValue), 0.00001);
     
     const scaleFactor = canvas.width / 1024;
     
     const topMargin = 60 * scaleFactor;
     const bottomMargin = 40 * scaleFactor;
-    const leftMargin = 180 * scaleFactor;
+    // 連語（collocation）の場合は単語よりも横幅が必要なため、左余白を広め（240 * scaleFactor）に確保
+    const leftMargin = (mode === 'collocation' ? 240 : 180) * scaleFactor;
     const rightMargin = 140 * scaleFactor;
     
     const availableHeight = canvas.height - topMargin - bottomMargin;
@@ -2912,9 +3068,12 @@ function drawBarChartOnCanvas(canvas, list, rankingMethod, selectedTheme, select
         drawRoundedRect(ctx, leftMargin, y, barWidth, barHeight, 4 * scaleFactor);
         ctx.fill();
         
-        const valDisplay = rankingMethod === 'tfidf'
-            ? `${item.count}回 (TF-IDF: ${item.tfidf.toFixed(2)})`
-            : `${item.count}回`;
+        let valDisplay = `${item.count}回`;
+        if (mode === 'collocation' && item.docCount && item.docCount !== item.count) {
+            valDisplay = `${item.count}回 (${item.docCount}件)`;
+        } else if (rankingMethod === 'tfidf' && item.tfidf !== undefined && mode !== 'collocation') {
+            valDisplay = `${item.count}回 (TF-IDF: ${item.tfidf.toFixed(2)})`;
+        }
             
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
@@ -3810,7 +3969,27 @@ function updateWordCloud() {
         const chartList = filteredList.slice(0, 20);
         const selectedFont = fontSelect.value;
         
-        drawBarChartOnCanvas(cloudCanvas, chartList, rankingMethod, selectedTheme, selectedFont, isDarkTheme);
+        drawBarChartOnCanvas(cloudCanvas, chartList, rankingMethod, selectedTheme, selectedFont, isDarkTheme, 'word');
+    } else if (currentDisplayType === 'collocation') {
+        cloudCanvas.style.display = 'block';
+        chartContainer.style.display = 'none';
+        if (ldaContainer) ldaContainer.style.display = 'none';
+        
+        const filteredCollocations = collocationFrequencies
+            .filter(item => item.count >= minCount)
+            .slice(0, 20);
+
+        if (filteredCollocations.length === 0) {
+            const ctx = cloudCanvas.getContext('2d');
+            ctx.clearRect(0, 0, cloudCanvas.width, cloudCanvas.height);
+            emptyState.style.display = 'flex';
+            emptyState.querySelector('h2').innerText = "条件に合う連語がありません";
+            emptyState.querySelector('p').innerText = "「最小出現回数」を下げるか、より多くのデータを読み込んでください。";
+            return;
+        }
+
+        const selectedFont = fontSelect.value;
+        drawBarChartOnCanvas(cloudCanvas, filteredCollocations, 'count', selectedTheme, selectedFont, isDarkTheme, 'collocation');
     } else if (currentDisplayType === 'network') {
         cloudCanvas.style.display = 'block';
         chartContainer.style.display = 'none';
@@ -4181,6 +4360,7 @@ downloadBtn.addEventListener('click', async () => {
         
         let defaultFilename = 'wordcloud.png';
         if (currentMode === 'chart') defaultFilename = 'barchart.png';
+        else if (currentMode === 'collocation') defaultFilename = 'collocation_ranking.png';
         else if (currentMode === 'network') defaultFilename = 'network_diagram.png';
         else if (currentMode === 'pca') defaultFilename = 'pca_scatter.png';
         else if (currentMode === 'umap') defaultFilename = 'umap_scatter.png';
@@ -4315,18 +4495,20 @@ downloadBtn.addEventListener('click', async () => {
                 downloadBtn.disabled = false;
                 downloadBtn.innerHTML = originalText;
             });
-        } else if (currentMode === 'chart') {
+        } else if (currentMode === 'chart' || currentMode === 'collocation') {
             const exportCanvas = document.createElement('canvas');
             exportCanvas.width = targetSize.w;
             exportCanvas.height = targetSize.h;
             
-            const chartList = filteredList.slice(0, 20);
+            const chartList = currentMode === 'collocation'
+                ? collocationFrequencies.filter(item => item.count >= minCount).slice(0, 20)
+                : filteredList.slice(0, 20);
             const selectedFont = fontSelect.value;
             
-            drawBarChartOnCanvas(exportCanvas, chartList, rankingMethod, selectedTheme, selectedFont, isDarkTheme);
+            drawBarChartOnCanvas(exportCanvas, chartList, rankingMethod, selectedTheme, selectedFont, isDarkTheme, currentMode);
             
             const image = exportCanvas.toDataURL("image/png");
-            saveImageFile(image, 'barchart.png');
+            saveImageFile(image, defaultFilename);
         } else if (currentMode === 'network') {
             const exportCanvas = document.createElement('canvas');
             exportCanvas.width = targetSize.w;
@@ -4525,15 +4707,36 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
         }
         
         let wordIndices = [];
-        for (let j = 0; j < tokens.length; j++) {
-            const token = tokens[j];
-            const pos = token.pos;
-            let wordStr = (pos === '動詞' || pos === '形容詞' || pos === '副詞') && token.basic_form !== '*' 
-                ? token.basic_form 
-                : token.surface_form;
-            
-            if (wordStr.trim() === word) {
-                wordIndices.push(j);
+        let matchSpan = 1;
+        const isPhrase = word.includes(' ');
+        const phraseParts = isPhrase ? word.split(/\s+/).map(p => p.trim()).filter(Boolean) : [word];
+
+        if (isPhrase) {
+            const compactPhrase = phraseParts.join('');
+            const lineSurface = tokens.map(t => t.surface_form).join('');
+            if (lineSurface.includes(compactPhrase)) {
+                const firstPart = phraseParts[0];
+                for (let j = 0; j < tokens.length; j++) {
+                    const token = tokens[j];
+                    if (token.surface_form === firstPart || token.basic_form === firstPart) {
+                        wordIndices.push(j);
+                        break;
+                    }
+                }
+                if (wordIndices.length === 0) wordIndices.push(0);
+                matchSpan = phraseParts.length;
+            }
+        } else {
+            for (let j = 0; j < tokens.length; j++) {
+                const token = tokens[j];
+                const pos = token.pos;
+                let wordStr = (pos === '動詞' || pos === '形容詞' || pos === '副詞') && token.basic_form !== '*' 
+                    ? token.basic_form 
+                    : token.surface_form;
+                
+                if (wordStr.trim() === word) {
+                    wordIndices.push(j);
+                }
             }
         }
         
@@ -4544,8 +4747,9 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
             tokens.forEach(t => {
                 const p = t.pos;
                 let tStr = (p === '動詞' || p === '形容詞' || p === '副詞') && t.basic_form !== '*' ? t.basic_form : t.surface_form;
-                // Exclude the target word itself, stopwords, and punctuation
-                if (allowedPOS.includes(p) && tStr !== word && !customStopWords.has(tStr) && !defaultStopWordsSet.has(tStr) && !/[!-/:-@[-`{-~、。，．・]/.test(tStr)) {
+                // Exclude target words, stopwords, and punctuation
+                const isTargetPart = isPhrase ? phraseParts.includes(tStr) : (tStr === word);
+                if (allowedPOS.includes(p) && !isTargetPart && !customStopWords.has(tStr) && !defaultStopWordsSet.has(tStr) && !/[!-/:-@[-`{-~、。，．・]/.test(tStr)) {
                     uniqueWordsInSentence.add(tStr);
                 }
             });
@@ -4567,7 +4771,7 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
             }
             
             let rightContext = "";
-            for (let j = wordIndex + 1; j < tokens.length; j++) {
+            for (let j = wordIndex + matchSpan; j < tokens.length; j++) {
                 rightContext += tokens[j].surface_form;
             }
             
