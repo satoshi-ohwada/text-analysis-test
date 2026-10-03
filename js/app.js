@@ -7,6 +7,7 @@ let globalAnalyzedLines = []; // Cached token lists per line: [[token, token...]
 let currentAnalysisCounts = {}; // Cached counts mapping for CSV export
 let currentAnalysisCoocCounts = {}; // Cached cooc counts mapping for CSV export
 let currentAnalysisDocFreq = {};    // Cached document-frequency for correct Jaccard in CSV export
+let currentAnalysisTokenDocFreq = {}; // Cached document-frequency for all tokens in N-gram collocation
 let currentTokenizeTaskId = 0;
 
 // Set for standard stop words (dynamically loaded from stopwords.txt)
@@ -1448,8 +1449,8 @@ function runKMeans(points, k, nRuns = 5) {
         // --- K-means++ Initialization ---
         const centroids = [];
         // 1. Pick first centroid uniformly at random
-        centroids.push({ x: points[Math.floor(Math.random() * n)].x,
-                         y: points[Math.floor(Math.random() * n)].y });
+        const firstIdx = Math.floor(Math.random() * n);
+        centroids.push({ x: points[firstIdx].x, y: points[firstIdx].y });
 
         // 2. Pick remaining centroids with probability proportional to squared distance
         for (let c = 1; c < k; c++) {
@@ -1552,10 +1553,13 @@ function downloadCSV(filename, csvContent) {
 exportWordsCsvBtn.addEventListener('click', () => {
     if (wordFrequencies.length === 0) return;
     
+    const isUmapMode = displayType && displayType.value === 'umap';
+    const activePoints = isUmapMode ? umapPoints : pcaPoints;
+
     let csv = "単語,出現回数,特徴度 (TF-IDF),クラスターID\n";
     wordFrequencies.forEach(item => {
-        const pcaPoint = pcaPoints.find(p => p.word === item.text);
-        const clusterId = pcaPoint ? `C${pcaPoint.cluster + 1}` : "-";
+        const pt = activePoints.find(p => p.word === item.text);
+        const clusterId = (pt && pt.cluster !== undefined && pt.cluster >= 0) ? `C${pt.cluster + 1}` : "-";
         const escapedWord = item.text.includes('"') ? item.text.replace(/"/g, '""') : item.text;
         csv += `"${escapedWord}",${item.count},${item.tfidf.toFixed(4)},${clusterId}\n`;
     });
@@ -1573,10 +1577,10 @@ exportPairsCsvBtn.addEventListener('click', () => {
     Object.entries(currentAnalysisCoocCounts).forEach(([key, fAB]) => {
         const [w1, w2] = key.split('|||');
         // Use document frequency (not raw count) for correct Jaccard denominator
-        const cA = currentAnalysisDocFreq[w1] || 1;
-        const cB = currentAnalysisDocFreq[w2] || 1;
+        const cA = Math.max(currentAnalysisDocFreq[w1] || 0, fAB);
+        const cB = Math.max(currentAnalysisDocFreq[w2] || 0, fAB);
         const denom = cA + cB - fAB;
-        const jaccard = denom > 0 ? fAB / denom : 0;
+        const jaccard = denom > 0 ? Math.max(0, Math.min(1.0, fAB / denom)) : 0;
         if (jaccard > 0.01) {
             pairs.push({ w1, w2, fAB, jaccard });
         }
@@ -1742,6 +1746,7 @@ function processAndRender() {
 
     const counts = {};
     const docFreq = {};
+    const tokenDocFreq = {};
     const coocCounts = {};
     const uniqueWordsPerLine = [];
     const lineWordsList = [];
@@ -1797,6 +1802,11 @@ function processAndRender() {
             .filter(w => w && !/^[!-/:-@[-`{-~、。，．・\s\r\n\t]+$/.test(w));
         tokenWordsList.push(lineTokens);
 
+        const uniqueTokensInLine = new Set(lineTokens);
+        uniqueTokensInLine.forEach(w => {
+            tokenDocFreq[w] = (tokenDocFreq[w] || 0) + 1;
+        });
+
         const wordsArr = Array.from(uniqueWordsInLine);
         for (let i = 0; i < wordsArr.length; i++) {
             docFreq[wordsArr[i]] = (docFreq[wordsArr[i]] || 0) + 1;
@@ -1813,6 +1823,7 @@ function processAndRender() {
     currentAnalysisCounts = counts;
     currentAnalysisCoocCounts = coocCounts;
     currentAnalysisDocFreq = docFreq; // Needed for correct Jaccard in CSV export
+    currentAnalysisTokenDocFreq = tokenDocFreq; // Needed for correct N-gram Jaccard
     currentAnalysisLineWordsList = lineWordsList;
     currentAnalysisTokenWordsList = tokenWordsList;
 
@@ -1878,6 +1889,7 @@ function processAndRender() {
     const filteredList = wordFrequencies.filter(item => item.count >= minCount).slice(0, maxWords);
     const allowedWordsSet = new Set(filteredList.map(item => item.text));
 
+    const finalThreshold = networkThresholdRange ? parseFloat(networkThresholdRange.value) : 0.05;
     const rawEdges = [];
     Object.entries(coocCounts).forEach(([key, fAB]) => {
         const [w1, w2] = key.split('|||');
@@ -1887,24 +1899,20 @@ function processAndRender() {
 
         // BUG FIX: use document frequency (how many lines contain the word),
         // not total occurrence count, for a mathematically correct Jaccard coefficient.
-        const cA = docFreq[w1] || 0;
-        const cB = docFreq[w2] || 0;
+        const cA = Math.max(docFreq[w1] || 0, fAB);
+        const cB = Math.max(docFreq[w2] || 0, fAB);
         const denom = cA + cB - fAB;
-        const jaccard = denom > 0 ? fAB / denom : 0;
+        const jaccard = denom > 0 ? Math.max(0, Math.min(1.0, fAB / denom)) : 0;
         
-        if (jaccard > 0.04) {
+        if (jaccard >= finalThreshold) {
             rawEdges.push({ sourceId: w1, targetId: w2, weight: jaccard });
         }
     });
     
     rawEdges.sort((a, b) => b.weight - a.weight);
     
-    // Filter to only meaningfully strong connections based on UI
-    const finalThreshold = 0.05;
-    const strictEdges = rawEdges.filter(e => e.weight >= finalThreshold);
-    
     // Limit to exactly 1.0 * maxWords to naturally separate the graph into disjoint communities
-    const topEdges = strictEdges.slice(0, Math.round(maxWords * 1.0));
+    const topEdges = rawEdges.slice(0, Math.round(maxWords * 1.0));
 
     const networkNodesSet = new Set();
     topEdges.forEach(e => {
@@ -2558,12 +2566,15 @@ function extractNgrams(n = 2, target = 'keywords', minCount = 1) {
             const docCount = ngramDocFreq[key] || 1;
             let jaccard = 0;
 
-            if (n === 2 && currentAnalysisDocFreq) {
+            if (n === 2) {
                 const [w1, w2] = words;
-                const cA = currentAnalysisDocFreq[w1] || count;
-                const cB = currentAnalysisDocFreq[w2] || count;
-                const denom = cA + cB - docCount;
-                jaccard = denom > 0 ? docCount / denom : 0;
+                const docFreqSource = target === 'keywords' ? currentAnalysisDocFreq : currentAnalysisTokenDocFreq;
+                if (docFreqSource) {
+                    const cA = Math.max(docFreqSource[w1] || 0, docCount);
+                    const cB = Math.max(docFreqSource[w2] || 0, docCount);
+                    const denom = cA + cB - docCount;
+                    jaccard = denom > 0 ? Math.max(0, Math.min(1.0, docCount / denom)) : 0;
+                }
             }
 
             return {
@@ -3911,7 +3922,7 @@ function updateWordCloud() {
                     const idx = topWordsForCluster.indexOf(wordStr);
                     if (idx !== -1) {
                         const clusterId = clusterResult.assignments[idx];
-                        return getNetworkNodeColor(selectedTheme, clusterId, isDarkTheme);
+                        return getNetworkNodeColor(selectedTheme, { word: wordStr, cluster: clusterId }, isDarkTheme);
                     }
                     return '#999999';
                 };
@@ -4532,7 +4543,7 @@ downloadBtn.addEventListener('click', async () => {
                         const idx = topWordsForCluster.indexOf(wordStr);
                         if (idx !== -1) {
                             const clusterId = clusterResult.assignments[idx];
-                            return getNetworkNodeColor(selectedTheme, clusterId, isDarkTheme);
+                            return getNetworkNodeColor(selectedTheme, { word: wordStr, cluster: clusterId }, isDarkTheme);
                         }
                         return '#999999';
                     };
