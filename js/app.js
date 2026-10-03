@@ -69,6 +69,11 @@ const emptyState = document.getElementById('empty-state');
 const tooltip = document.getElementById('tooltip');
 const downloadBtn = document.getElementById('download-btn');
 const downloadSize = document.getElementById('download-size');
+const downloadSizeMenu = document.getElementById('download-size-menu');
+const downloadChevron = document.getElementById('download-chevron');
+const downloadSizeMediumBtn = document.getElementById('download-size-medium-btn');
+const downloadSizeLargeBtn = document.getElementById('download-size-large-btn');
+const downloadSizeSmallBtn = document.getElementById('download-size-small-btn');
 const canvasContainer = document.getElementById('canvas-container');
 
 // Settings Elements
@@ -2282,7 +2287,7 @@ function downloadCSV(filename, csvContent) {
     }
 }
 
-// --- CSV Export Dropdown Toggle & Close Logic ---
+// --- CSV & Image Export Dropdown Toggle & Close Logic ---
 function closeCsvDropdown() {
     if (exportCsvMenu) exportCsvMenu.style.display = 'none';
     if (exportCsvChevron) exportCsvChevron.style.transform = 'rotate(0deg)';
@@ -2291,6 +2296,7 @@ function closeCsvDropdown() {
 function toggleCsvDropdown(e) {
     if (e) e.stopPropagation();
     if (!exportCsvMenu || (exportCsvDropdownBtn && exportCsvDropdownBtn.disabled)) return;
+    closeImageDropdown();
     const isShowing = exportCsvMenu.style.display === 'block';
     if (isShowing) {
         closeCsvDropdown();
@@ -2304,11 +2310,39 @@ if (exportCsvDropdownBtn) {
     exportCsvDropdownBtn.addEventListener('click', toggleCsvDropdown);
 }
 
+function closeImageDropdown() {
+    if (downloadSizeMenu) downloadSizeMenu.style.display = 'none';
+    if (downloadChevron) downloadChevron.style.transform = 'rotate(0deg)';
+}
+
+function toggleImageDropdown(e) {
+    if (e) e.stopPropagation();
+    if (!downloadSizeMenu || (downloadBtn && downloadBtn.disabled)) return;
+    closeCsvDropdown();
+    const isShowing = downloadSizeMenu.style.display === 'block';
+    if (isShowing) {
+        closeImageDropdown();
+    } else {
+        downloadSizeMenu.style.display = 'block';
+        if (downloadChevron) downloadChevron.style.transform = 'rotate(180deg)';
+    }
+}
+
+if (downloadBtn) {
+    downloadBtn.addEventListener('click', toggleImageDropdown);
+}
+
 document.addEventListener('click', (e) => {
     if (exportCsvMenu && exportCsvMenu.style.display === 'block') {
         const wrapper = document.querySelector('.csv-dropdown-wrapper');
         if (wrapper && !wrapper.contains(e.target)) {
             closeCsvDropdown();
+        }
+    }
+    if (downloadSizeMenu && downloadSizeMenu.style.display === 'block') {
+        const wrapper = document.querySelector('.image-dropdown-wrapper');
+        if (wrapper && !wrapper.contains(e.target)) {
+            closeImageDropdown();
         }
     }
 });
@@ -5291,15 +5325,16 @@ function toggleAnalysisSummary() {
     }
 }
 
-// 6. Download Word Cloud, Bar Chart, Network Diagram, or PCA Scatter Plot as Image
-downloadBtn.addEventListener('click', async () => {
+// 6. Download Word Cloud, Bar Chart, Network Diagram, PCA/UMAP, LDA, or Collocation as Image
+async function executeImageDownload(sizeKey = 'medium') {
+    if (downloadSize) downloadSize.value = sizeKey;
     try {
         const sizes = {
             small: { w: 800, h: 600 },
             medium: { w: 1200, h: 900 },
             large: { w: 1920, h: 1080 }
         };
-        const targetSize = sizes[downloadSize.value] || sizes.medium;
+        const targetSize = sizes[sizeKey] || sizes.medium;
         
         const selectedTheme = colorTheme.value;
         const isDarkTheme = selectedTheme === 'aurora-dark' || selectedTheme === 'monochrome-dark';
@@ -5357,6 +5392,20 @@ downloadBtn.addEventListener('click', async () => {
 
         if (filteredList.length === 0) return;
 
+        const originalBtnHtml = downloadBtn ? downloadBtn.innerHTML : '';
+        const setBtnExporting = () => {
+            if (downloadBtn) {
+                downloadBtn.disabled = true;
+                downloadBtn.innerText = "書き出し中...";
+            }
+        };
+        const restoreBtn = () => {
+            if (downloadBtn) {
+                downloadBtn.disabled = false;
+                downloadBtn.innerHTML = originalBtnHtml;
+            }
+        };
+
         if (currentMode === 'cloud') {
             const exportCanvas = document.createElement('canvas');
             exportCanvas.width = targetSize.w;
@@ -5366,13 +5415,10 @@ downloadBtn.addEventListener('click', async () => {
             ctx.fillStyle = isDarkTheme ? '#0B0F19' : '#FFFFFF';
             ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
             
-            const originalText = downloadBtn.innerHTML;
-            downloadBtn.disabled = true;
-            downloadBtn.innerText = "書き出し中...";
+            setBtnExporting();
             
             const exportTimeout = setTimeout(() => {
-                downloadBtn.disabled = false;
-                downloadBtn.innerText = '📷 PNG保存';
+                restoreBtn();
             }, 8000);
             
             const selectedFont = fontSelect.value;
@@ -5439,9 +5485,7 @@ downloadBtn.addEventListener('click', async () => {
                 clearTimeout(exportTimeout);
                 const image = exportCanvas.toDataURL("image/png");
                 saveImageFile(image, 'wordcloud.png');
-                
-                downloadBtn.disabled = false;
-                downloadBtn.innerHTML = originalText;
+                restoreBtn();
             });
         } else if (currentMode === 'chart') {
             const exportCanvas = document.createElement('canvas');
@@ -5520,9 +5564,7 @@ downloadBtn.addEventListener('click', async () => {
             if (!targetContainer) return;
             const targetFilename = currentMode === 'collocation' ? 'collocation_ngram.png' : 'topic_lda.png';
             
-            const originalText = downloadBtn.innerHTML;
-            downloadBtn.disabled = true;
-            downloadBtn.innerText = "書き出し中...";
+            setBtnExporting();
 
             const exportHTMLContent = () => {
                 // Temporarily expand container to capture full scrolling content
@@ -5547,8 +5589,7 @@ downloadBtn.addEventListener('click', async () => {
                     const image = canvas.toDataURL("image/png");
                     saveImageFile(image, targetFilename);
                     
-                    downloadBtn.disabled = false;
-                    downloadBtn.innerHTML = originalText;
+                    restoreBtn();
                 }).catch(error => {
                     // Restore original styles on error
                     targetContainer.style.height = originalHeight;
@@ -5556,8 +5597,7 @@ downloadBtn.addEventListener('click', async () => {
                     targetContainer.style.position = originalPosition;
 
                     console.error("html2canvas error:", error);
-                    downloadBtn.disabled = false;
-                    downloadBtn.innerHTML = originalText;
+                    restoreBtn();
                     alert("画像の書き出しに失敗しました。\nエラー内容: " + error.message);
                 });
             };
@@ -5567,8 +5607,7 @@ downloadBtn.addEventListener('click', async () => {
                 script.src = "lib/html2canvas/html2canvas.min.js";
                 script.onload = exportHTMLContent;
                 script.onerror = () => {
-                    downloadBtn.disabled = false;
-                    downloadBtn.innerHTML = originalText;
+                    restoreBtn();
                     alert("画像化ライブラリが見つかりません。\nlib/html2canvas/html2canvas.min.js が存在するか確認してください。");
                 };
                 document.head.appendChild(script);
@@ -5580,7 +5619,27 @@ downloadBtn.addEventListener('click', async () => {
         console.error("PNG export failed:", error);
         alert("画像の書き出しに失敗しました。\nエラー内容: " + error.message);
     }
-});
+}
+
+// Bind image size dropdown menu items
+if (downloadSizeMediumBtn) {
+    downloadSizeMediumBtn.addEventListener('click', () => {
+        closeImageDropdown();
+        executeImageDownload('medium');
+    });
+}
+if (downloadSizeLargeBtn) {
+    downloadSizeLargeBtn.addEventListener('click', () => {
+        closeImageDropdown();
+        executeImageDownload('large');
+    });
+}
+if (downloadSizeSmallBtn) {
+    downloadSizeSmallBtn.addEventListener('click', () => {
+        closeImageDropdown();
+        executeImageDownload('small');
+    });
+}
 
 function triggerRelayout() {
     if (wordFrequencies.length === 0) return;

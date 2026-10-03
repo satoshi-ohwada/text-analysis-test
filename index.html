@@ -334,16 +334,32 @@
                     
                     <span style="border-left: 1px solid var(--border-color); height: 18px; margin: 0 2px;"></span>
 
-                    <!-- Image download actions -->
-                    <select id="download-size" class="select-control" style="width: auto; height: 36px; padding: 0 8px; font-size: 12px; margin: 0; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
-                        <option value="small">小 (800×600)</option>
-                        <option value="medium" selected>中 (1200×900)</option>
-                        <option value="large">大 (1920×1080)</option>
-                    </select>
-                    <button class="btn btn-primary" id="download-btn" style="height: 36px; padding: 0 12px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;" title="表示されているグラフを画像としてダウンロード" disabled>
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-                        画像保存
-                    </button>
+                    <!-- Consolidated Image Download Dropdown -->
+                    <div class="image-dropdown-wrapper" style="position: relative; display: inline-block;">
+                        <input type="hidden" id="download-size" value="medium">
+                        <button class="btn btn-primary" id="download-btn" style="height: 36px; padding: 0 12px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px;" title="表示されているグラフを画像としてダウンロード（サイズ選択）" disabled>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                            <span>画像保存</span>
+                            <svg id="download-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.2s ease;"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        </button>
+                        <div id="download-size-menu" style="display: none; position: absolute; top: calc(100% + 6px); right: 0; min-width: 250px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5), 0 8px 10px -6px rgba(0,0,0,0.3); padding: 6px; z-index: 1000;">
+                            <button type="button" class="csv-menu-item" data-size="medium" id="download-size-medium-btn">
+                                <span class="csv-item-title">
+                                    <span style="font-size: 14px;">🖼️</span> 中サイズ (1200×900)
+                                    <span style="font-size: 10px; background: rgba(59, 130, 246, 0.2); color: var(--accent-blue); padding: 1px 6px; border-radius: 10px; margin-left: auto; font-weight: normal;">推奨</span>
+                                </span>
+                                <span class="csv-item-desc">レポートや資料作成に最適な標準解像度</span>
+                            </button>
+                            <button type="button" class="csv-menu-item" data-size="large" id="download-size-large-btn">
+                                <span class="csv-item-title"><span style="font-size: 14px;">🖼️</span> 大サイズ (1920×1080)</span>
+                                <span class="csv-item-desc">プレゼンテーションや高精細画面用</span>
+                            </button>
+                            <button type="button" class="csv-menu-item" data-size="small" id="download-size-small-btn">
+                                <span class="csv-item-title"><span style="font-size: 14px;">🖼️</span> 小サイズ (800×600)</span>
+                                <span class="csv-item-desc">ファイル容量を抑えた軽量画像</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </header>
 
