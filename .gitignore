@@ -1,0 +1,12 @@
+# OS generated files
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Environment and confidential/internal data
+.env
+data/受講者自由意見*
+
+# Binaries and dependencies
+node_modules/
+server/APP/
