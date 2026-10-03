@@ -104,6 +104,14 @@ const addStopwordBtn = document.getElementById('add-stopword-btn');
 const stopwordsList = document.getElementById('stopwords-list');
 const resetStopwordsBtn = document.getElementById('reset-stopwords-btn');
 
+// Rules File I/O Elements (Plan 2: Sectioned Text Format)
+const rulesIoContainer = document.getElementById('rules-io-container');
+const exportRulesBtn = document.getElementById('export-rules-btn');
+const importRulesBtn = document.getElementById('import-rules-btn');
+const rulesFileInput = document.getElementById('rules-file-input');
+const downloadTemplateBtn = document.getElementById('download-template-btn');
+const clearAllRulesBtn = document.getElementById('clear-all-rules-btn');
+
 // Export & Relayout Action Buttons
 const exportWordsCsvBtn = document.getElementById('export-words-csv-btn');
 const exportPairsCsvBtn = document.getElementById('export-pairs-csv-btn');
@@ -181,6 +189,17 @@ async function initKuromoji() {
         console.error("Error loading stopwords.txt:", e);
     }
 
+    let defaultCustomRulesText = null;
+    try {
+        // Check for workspace default custom_rules.txt
+        const rulesResp = await fetch('data/custom_rules.txt');
+        if (rulesResp.ok) {
+            defaultCustomRulesText = await rulesResp.text();
+        }
+    } catch (e) {
+        // Optional file
+    }
+
     progressBar.style.width = '50%';
     const dicPath = "lib/kuromoji/dict/";
 
@@ -202,6 +221,17 @@ async function initKuromoji() {
         }, 500);
         
         loadSettings();
+
+        // If local storage has no custom rules yet, initialize from data/custom_rules.txt if present
+        if (customCompoundWords.size === 0 && customStopWords.size === 0 && customSynonymRules.size === 0 && defaultCustomRulesText) {
+            const parsed = parseRulesText(defaultCustomRulesText);
+            if (parsed.compoundWords.size > 0 || parsed.stopWords.size > 0 || parsed.synonymRules.size > 0) {
+                customCompoundWords = parsed.compoundWords;
+                customStopWords = parsed.stopWords;
+                customSynonymRules = parsed.synonymRules;
+                saveSettings();
+            }
+        }
         
         renderStopWords();
         renderCompoundWords();
@@ -360,6 +390,442 @@ function addSynonymRule(fromWord, toWord) {
     }
 }
 
+// ========================================================
+// 辞書・ルール設定ファイル入出力（セクション区切りテキスト方式）
+// ========================================================
+let pendingParsedRules = null;
+
+function isSectionHeader(line) {
+    line = line.trim();
+    if (!line) return null;
+
+    // Check if bracketed: [複合語], 【除外ワード】, etc.
+    const bracketMatch = line.match(/^[#\s■●▼*+\-]*[\[【](.+?)[\]】]/);
+    if (bracketMatch) {
+        const textInside = bracketMatch[1];
+        if (/(?:複合語|まとめ語|結合語|compound)/i.test(textInside)) return 'compound';
+        if (/(?:除外|ストップワード|不要語|stopword)/i.test(textInside)) return 'stopword';
+        if (/(?:表記ゆれ|表記揺れ|置換|同義語|類義語|統一|synonym|replace)/i.test(textInside)) return 'synonym';
+        return null;
+    }
+
+    // If not bracketed, it MUST start with a header marker (#, ##, ■, ●, ▼, 1., 2., 3., etc.)
+    const markerMatch = line.match(/^(?:#+|■|●|▼|\d+\.)\s*(.+)$/);
+    if (markerMatch) {
+        const afterMarker = markerMatch[1].trim();
+        // Section headers are short (<= 20 chars) and do NOT contain rule arrows (->, →, =>)
+        if (afterMarker.length <= 20 && !/(?:->|-->|=>|→|⇒)/.test(afterMarker)) {
+            if (/^(?:複合語|まとめ語|結合語|compound words?)$/i.test(afterMarker) ||
+                /(?:複合語|まとめ語|結合語)/.test(afterMarker)) return 'compound';
+            if (/(?:除外|ストップワード|不要語|stopwords?)/i.test(afterMarker)) return 'stopword';
+            if (/(?:表記ゆれ|表記揺れ|置換|同義語|類義語|synonyms?)/i.test(afterMarker) ||
+                /(?:表記ゆれの統一|置換ルール)/.test(afterMarker)) return 'synonym';
+        }
+    }
+
+    return null;
+}
+
+function parseRulesText(text) {
+    const compoundWords = new Set();
+    const stopWords = new Set();
+    const synonymRules = new Map();
+    const unclassifiedWords = [];
+    let hasExplicitSection = false;
+
+    if (!text) return { compoundWords, stopWords, synonymRules, unclassifiedWords, hasExplicitSection };
+
+    // Remove BOM and normalize line endings
+    text = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = text.split('\n');
+    let currentSection = null; // 'compound' | 'stopword' | 'synonym'
+
+    for (let rawLine of lines) {
+        let line = rawLine.trim();
+        if (!line) continue;
+
+        // Check if line is a section header
+        const section = isSectionHeader(line);
+        if (section) {
+            currentSection = section;
+            hasExplicitSection = true;
+            continue;
+        }
+
+        // Ignore pure comment lines
+        if (line.startsWith('#') || line.startsWith('//') || line.startsWith(';')) {
+            continue;
+        }
+
+        // Strip inline comments if present (e.g. "word # comment")
+        const inlineCommentIdx = line.search(/\s+(?:#|\/\/)/);
+        if (inlineCommentIdx !== -1) {
+            line = line.substring(0, inlineCommentIdx).trim();
+        }
+        if (!line) continue;
+
+        if (currentSection === 'compound') {
+            compoundWords.add(line);
+        } else if (currentSection === 'stopword') {
+            stopWords.add(line);
+        } else if (currentSection === 'synonym') {
+            // Find separator: ->, -->, =>, →, ⇒, tab, comma, colon
+            const sepMatch = line.match(/\s*(?:->|-->|=>|→|⇒|\t|,|，|：|:)\s*/);
+            if (sepMatch) {
+                const fromWord = line.substring(0, sepMatch.index).trim();
+                const toWord = line.substring(sepMatch.index + sepMatch[0].length).trim();
+                if (fromWord && toWord) {
+                    synonymRules.set(fromWord, toWord);
+                }
+            }
+        } else {
+            // No section header encountered yet
+            const sepMatch = line.match(/\s*(?:->|-->|=>|→|⇒|\t)\s*/);
+            if (sepMatch) {
+                const fromWord = line.substring(0, sepMatch.index).trim();
+                const toWord = line.substring(sepMatch.index + sepMatch[0].length).trim();
+                if (fromWord && toWord) {
+                    synonymRules.set(fromWord, toWord);
+                }
+            } else {
+                unclassifiedWords.push(line);
+            }
+        }
+    }
+
+    return { compoundWords, stopWords, synonymRules, unclassifiedWords, hasExplicitSection };
+}
+
+function generateRulesText(compoundWordsSet, stopWordsSet, synonymRulesMap) {
+    const lines = [];
+    lines.push("# ========================================================");
+    lines.push("# 簡易テキスト分析ツール - 辞書・ルール設定ファイル");
+    lines.push("#");
+    lines.push("# 【使い方】");
+    lines.push("# ・このファイルはメモ帳などのテキストエディタで自由に編集できます。");
+    lines.push("# ・行頭に「#」を付けるとその行はコメント（説明文）になります。");
+    lines.push("# ・各セクション見出し（# [複合語] など）の下に設定したい単語を記述してください。");
+    lines.push("# ========================================================");
+    lines.push("");
+
+    lines.push("# [複合語]");
+    lines.push("# 形態素解析で分解されたくない単語を1行に1つずつ記述します。");
+    lines.push("# （例: 「青森県社会経済白書」が分割されずに1単語として扱われます）");
+    if (compoundWordsSet && compoundWordsSet.size > 0) {
+        const sortedCompounds = Array.from(compoundWordsSet).sort((a, b) => a.localeCompare(b, 'ja'));
+        sortedCompounds.forEach(word => lines.push(word));
+    } else {
+        lines.push("# （登録されている複合語はありません）");
+    }
+    lines.push("");
+
+    lines.push("# [除外ワード]");
+    lines.push("# 分析結果から除外したい不要語（ストップワード）を1行に1つずつ記述します。");
+    if (stopWordsSet && stopWordsSet.size > 0) {
+        const sortedStopWords = Array.from(stopWordsSet).sort((a, b) => a.localeCompare(b, 'ja'));
+        sortedStopWords.forEach(word => lines.push(word));
+    } else {
+        lines.push("# （登録されている除外ワードはありません）");
+    }
+    lines.push("");
+
+    lines.push("# [表記ゆれ]");
+    lines.push("# 表記ゆれや同義語を統一するルールを「元の語 -> 統一後の語」の形式で記述します。");
+    lines.push("# 矢印記号（-> や →）のほか、カンマ区切り（元の語,統一後の語）でも記述可能です。");
+    if (synonymRulesMap && synonymRulesMap.size > 0) {
+        const sortedSynonyms = Array.from(synonymRulesMap.entries()).sort((a, b) => a[0].localeCompare(b, 'ja'));
+        sortedSynonyms.forEach(([from, to]) => lines.push(`${from} -> ${to}`));
+    } else {
+        lines.push("# （登録されている表記ゆれルールはありません）");
+    }
+    lines.push("");
+
+    return lines.join("\n");
+}
+
+function exportRulesToFile() {
+    const text = generateRulesText(customCompoundWords, customStopWords, customSynonymRules);
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const filename = `analysis_rules_${yyyy}${mm}${dd}.txt`;
+
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadRulesTemplate() {
+    const templateText = [
+        "# ========================================================",
+        "# 簡易テキスト分析ツール - 辞書・ルール設定ファイル（見本・ひな型）",
+        "#",
+        "# 【使い方】",
+        "# 1. このファイルをメモ帳などのテキストエディタで開きます。",
+        "# 2. 各セクション（# [複合語] など）の下に、登録したい言葉を記述します。",
+        "# 3. ファイルを保存（文字コードはUTF-8またはShift-JIS推奨）し、",
+        "#    ツールの「設定を読込」ボタンまたはドラッグ＆ドロップで読み込みます。",
+        "#",
+        "# ※ 行頭に「#」がある行はコメント（説明）として読み飛ばされます。",
+        "# ========================================================",
+        "",
+        "# [複合語]",
+        "# 形態素解析でバラバラに分割されたくない単語を1行に1つずつ記述します。",
+        "# 例: 「青森県社会経済白書」が「青森 / 県 / 社会 / 経済 / 白書」に分かれず、",
+        "#     1つのまとまったキーワードとして集計・可視化されます。",
+        "青森県社会経済白書",
+        "地域課題",
+        "EBPM",
+        "重回帰分析",
+        "",
+        "# [除外ワード]",
+        "# 分析結果（ワードクラウドや頻出語ランキング等）から除外したい単語を1行に1つずつ記述します。",
+        "# ※ 一般的な助詞や代名詞（これ、それ等）は標準で除外されていますので、",
+        "#    アンケート特有の頻出語や挨拶文などを登録するのに便利です。",
+        "こと",
+        "もの",
+        "ため",
+        "よう",
+        "よろしくお願いいたします",
+        "",
+        "# [表記ゆれ]",
+        "# 表記ゆれや同義語を統一するルールを「元の語 -> 統一後の語」の形式で記述します。",
+        "# 矢印記号（-> や →）のほか、カンマ区切り（元の語,統一後の語）でも記述できます。",
+        "AI -> 人工知能",
+        "PC -> パソコン",
+        "イラン情勢 -> 中東情勢",
+        "スマホ -> スマートフォン",
+        ""
+    ].join("\n");
+
+    const blob = new Blob([templateText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = "analysis_rules_template.txt";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function clearAllRules() {
+    const totalCount = customCompoundWords.size + customStopWords.size + customSynonymRules.size;
+    if (totalCount === 0) {
+        alert("現在登録されている設定はありません。");
+        return;
+    }
+
+    if (confirm(`登録されているすべての設定（複合語 ${customCompoundWords.size}件、除外ワード ${customStopWords.size}件、表記ゆれ ${customSynonymRules.size}件）を消去しますか？\n\n※この操作は取り消せません。必要に応じて事前に「設定を出力」で保存してください。`)) {
+        customCompoundWords.clear();
+        customStopWords.clear();
+        customSynonymRules.clear();
+        saveSettings();
+        renderCompoundWords();
+        renderStopWords();
+        renderSynonymRules();
+        if (rawTextData) {
+            processAndRender();
+        }
+    }
+}
+
+function applyParsedRules(parsed, mode) {
+    if (mode === 'overwrite') {
+        customCompoundWords = new Set(parsed.compoundWords);
+        customStopWords = new Set(parsed.stopWords);
+        customSynonymRules = new Map(parsed.synonymRules);
+    } else { // 'merge'
+        parsed.compoundWords.forEach(w => customCompoundWords.add(w));
+        parsed.stopWords.forEach(w => customStopWords.add(w));
+        parsed.synonymRules.forEach((v, k) => customSynonymRules.set(k, v));
+    }
+
+    saveSettings();
+    renderCompoundWords();
+    renderStopWords();
+    renderSynonymRules();
+
+    if (rawTextData) {
+        processAndRender();
+    }
+}
+
+function openRulesImportProcess(text, fileName) {
+    const parsed = parseRulesText(text);
+    const totalCount = parsed.compoundWords.size + parsed.stopWords.size + parsed.synonymRules.size;
+
+    if (totalCount === 0) {
+        if (parsed.unclassifiedWords && parsed.unclassifiedWords.length > 0) {
+            const sampleWords = parsed.unclassifiedWords.slice(0, 5).join('、');
+            const userChoice = confirm(
+                `ファイル内にセクション見出し（# [複合語]、# [除外ワード]、# [表記ゆれ]）が見つかりませんでしたが、${parsed.unclassifiedWords.length} 個の単語が検出されました。\n（例: ${sampleWords}...）\n\n【OK】を押すとこれらを「除外ワード」として登録します。\n【キャンセル】を押すと処理を中止します。`
+            );
+            if (userChoice) {
+                parsed.unclassifiedWords.forEach(w => parsed.stopWords.add(w));
+                applyParsedRules(parsed, 'merge');
+                alert(`除外ワードに ${parsed.unclassifiedWords.length} 件を追加しました。`);
+            }
+            return;
+        }
+
+        alert("ファイル内に有効な複合語、除外ワード、表記ゆれルールが見つかりませんでした。\n「書き方・見本ファイルをDL」を参考にファイルを作成してください。");
+        return;
+    }
+
+    const currentTotalCount = customCompoundWords.size + customStopWords.size + customSynonymRules.size;
+    if (currentTotalCount === 0) {
+        applyParsedRules(parsed, 'overwrite');
+        alert(
+            `設定ファイルを読み込みました（${fileName || 'ファイル'}）。\n` +
+            `・複合語: ${parsed.compoundWords.size} 件\n` +
+            `・除外ワード: ${parsed.stopWords.size} 件\n` +
+            `・表記ゆれの統一: ${parsed.synonymRules.size} 件`
+        );
+        return;
+    }
+
+    // Open modal to ask Merge or Overwrite
+    pendingParsedRules = parsed;
+    const rulesModalOverlay = document.getElementById('rules-modal-overlay');
+    const modalCompoundCount = document.getElementById('modal-compound-count');
+    const modalStopwordCount = document.getElementById('modal-stopword-count');
+    const modalSynonymCount = document.getElementById('modal-synonym-count');
+
+    if (modalCompoundCount) modalCompoundCount.textContent = parsed.compoundWords.size;
+    if (modalStopwordCount) modalStopwordCount.textContent = parsed.stopWords.size;
+    if (modalSynonymCount) modalSynonymCount.textContent = parsed.synonymRules.size;
+
+    if (rulesModalOverlay) {
+        rulesModalOverlay.style.display = 'flex';
+    }
+}
+
+function importRulesFromFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const buffer = e.target.result;
+        let text = "";
+        try {
+            const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+            text = utf8Decoder.decode(buffer);
+        } catch (err) {
+            const sjisDecoder = new TextDecoder('shift-jis');
+            text = sjisDecoder.decode(buffer);
+        }
+        openRulesImportProcess(text, file.name);
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+function isRulesFileContent(text) {
+    if (!text) return false;
+    const headerPattern = /(?:^|\n)\s*(?:#|\/\/|■|\[|【)?\s*\[?(?:複合語|除外ワード|ストップワード|表記ゆれ|置換ルール)[\]】]?/i;
+    return headerPattern.test(text.substring(0, 2000));
+}
+
+function initRulesFileListeners() {
+    if (importRulesBtn && rulesFileInput) {
+        importRulesBtn.addEventListener('click', () => {
+            rulesFileInput.value = '';
+            rulesFileInput.click();
+        });
+
+        rulesFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                importRulesFromFile(file);
+            }
+        });
+    }
+
+    if (exportRulesBtn) {
+        exportRulesBtn.addEventListener('click', exportRulesToFile);
+    }
+
+    if (downloadTemplateBtn) {
+        downloadTemplateBtn.addEventListener('click', downloadRulesTemplate);
+    }
+
+    if (clearAllRulesBtn) {
+        clearAllRulesBtn.addEventListener('click', clearAllRules);
+    }
+
+    if (rulesIoContainer) {
+        rulesIoContainer.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            rulesIoContainer.style.borderColor = 'var(--accent-blue)';
+            rulesIoContainer.style.background = 'rgba(59, 130, 246, 0.08)';
+        });
+
+        rulesIoContainer.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            rulesIoContainer.style.borderColor = 'var(--border-color)';
+            rulesIoContainer.style.background = 'rgba(255, 255, 255, 0.02)';
+        });
+
+        rulesIoContainer.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            rulesIoContainer.style.borderColor = 'var(--border-color)';
+            rulesIoContainer.style.background = 'rgba(255, 255, 255, 0.02)';
+
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                importRulesFromFile(e.dataTransfer.files[0]);
+            }
+        });
+    }
+
+    // Modal listeners
+    const rulesModalOverlay = document.getElementById('rules-modal-overlay');
+    const rulesModalCloseBtn = document.getElementById('rules-modal-close-btn');
+    const rulesModalCancelBtn = document.getElementById('rules-modal-cancel-btn');
+    const rulesModalMergeBtn = document.getElementById('rules-modal-merge-btn');
+    const rulesModalOverwriteBtn = document.getElementById('rules-modal-overwrite-btn');
+
+    function closeModal() {
+        if (rulesModalOverlay) rulesModalOverlay.style.display = 'none';
+        pendingParsedRules = null;
+    }
+
+    if (rulesModalCloseBtn) rulesModalCloseBtn.onclick = closeModal;
+    if (rulesModalCancelBtn) rulesModalCancelBtn.onclick = closeModal;
+    if (rulesModalOverlay) {
+        rulesModalOverlay.onclick = (e) => {
+            if (e.target === rulesModalOverlay) closeModal();
+        };
+    }
+
+    if (rulesModalMergeBtn) {
+        rulesModalMergeBtn.onclick = () => {
+            if (pendingParsedRules) {
+                applyParsedRules(pendingParsedRules, 'merge');
+                closeModal();
+            }
+        };
+    }
+
+    if (rulesModalOverwriteBtn) {
+        rulesModalOverwriteBtn.onclick = () => {
+            if (pendingParsedRules) {
+                applyParsedRules(pendingParsedRules, 'overwrite');
+                closeModal();
+            }
+        };
+    }
+}
+initRulesFileListeners();
+
 // 2. Input switcher listeners
 tabBtnFile.addEventListener('click', () => {
     tabBtnFile.classList.add('active');
@@ -495,10 +961,17 @@ newStopwordInput.addEventListener('keypress', (e) => {
 });
 
 resetStopwordsBtn.addEventListener('click', () => {
-    customStopWords.clear();
-    renderStopWords();
-    if (rawTextData) {
-        processAndRender();
+    if (customStopWords.size === 0) {
+        alert("追加された除外ワードはありません。");
+        return;
+    }
+    if (confirm("画面上で追加した除外ワードをすべてクリアしますか？（標準の除外リストは維持されます）")) {
+        customStopWords.clear();
+        saveSettings();
+        renderStopWords();
+        if (rawTextData) {
+            processAndRender();
+        }
     }
 });
 
@@ -778,6 +1251,19 @@ function handleFile(file) {
             console.log("UTF-8 decoding failed, falling back to Shift-JIS");
             const sjisDecoder = new TextDecoder('shift-jis');
             text = sjisDecoder.decode(buffer);
+        }
+
+        // Check if file is a rules/dictionary file
+        if (isRulesFileContent(text)) {
+            const shouldImportRules = confirm(
+                `読み込まれたファイル「${file.name}」には、辞書・ルールのセクション見出し（# [複合語] など）が含まれています。\n\n` +
+                `【OK】: 設定ファイルとして読み込み（辞書・除外・表記ゆれに適用）\n` +
+                `【キャンセル】: 通常の分析対象テキストとして読み込み`
+            );
+            if (shouldImportRules) {
+                openRulesImportProcess(text, file.name);
+                return;
+            }
         }
 
         const isCsv = file.name.toLowerCase().endsWith('.csv') || file.name.toLowerCase().endsWith('.tsv');

@@ -186,6 +186,39 @@
                 </div>
             </div>
 
+            <!-- Rules File I/O Panel (Plan 2: Sectioned Text Format) -->
+            <div class="control-group" id="rules-io-container" style="background: rgba(255, 255, 255, 0.02); border: 1px dashed var(--border-color); border-radius: 8px; padding: 12px; transition: border-color 0.2s, background 0.2s;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <h3 style="margin: 0; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                        設定ファイル（辞書・ルール）
+                    </h3>
+                    <span style="font-size: 10.5px; padding: 2px 6px; background: rgba(59, 130, 246, 0.15); color: var(--accent-blue); border-radius: 4px; font-weight: 500;">TXT形式</span>
+                </div>
+                <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4;">
+                    複合語・除外・表記ゆれルールを1つのテキストファイルで保存・一括読込できます。メモ帳で編集も可能です。
+                </p>
+                <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+                    <button class="btn btn-secondary btn-xs" id="export-rules-btn" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" title="現在の複合語・除外ワード・置換ルールをテキストファイルとして書き出します">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        設定を出力
+                    </button>
+                    <button class="btn btn-secondary btn-xs" id="import-rules-btn" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" title="テキストファイルから設定を読み込みます">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        設定を読込
+                    </button>
+                    <input type="file" id="rules-file-input" accept=".txt,.text" style="display: none;">
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; padding-top: 2px;">
+                    <button class="btn-link" id="download-template-btn" style="background: none; border: none; color: var(--accent-blue); padding: 0; cursor: pointer; text-decoration: underline; font-size: 10.5px;">
+                        書き方・見本ファイルをDL
+                    </button>
+                    <button class="btn-link" id="clear-all-rules-btn" style="background: none; border: none; color: #EF4444; padding: 0; cursor: pointer; text-decoration: underline; font-size: 10.5px;" title="画面上の複合語・除外ワード・置換ルールをすべてクリアします">
+                        全設定クリア
+                    </button>
+                </div>
+            </div>
+
             <div class="control-group">
                 <h3>4. 複合語（一つにまとめる単語）</h3>
                 <div class="stopword-input-container">
@@ -408,6 +441,45 @@
         </div>
     </div>
 
-    <script src="js/app.js?v=4.0"></script>
+    <!-- Rules Import Modal (Plan 2: Sectioned Text Format) -->
+    <div id="rules-modal-overlay" class="kwic-overlay" style="display: none; z-index: 1100;">
+        <div class="kwic-modal" style="max-width: 480px; padding: 24px;">
+            <header class="kwic-header" style="margin-bottom: 16px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 18px;">📋</span>
+                    <strong style="font-size: 16px; color: var(--text-primary);">設定ファイル（辞書・ルール）の読込</strong>
+                </div>
+                <button id="rules-modal-close-btn" class="kwic-close" aria-label="閉じる">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </header>
+            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.5;">
+                読み込んだファイルから以下の設定が検出されました：
+            </p>
+            <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; line-height: 1.8;">
+                <div>🔹 複合語: <strong id="modal-compound-count" style="color: var(--accent-blue);">0</strong> 件</div>
+                <div>🔹 除外ワード: <strong id="modal-stopword-count" style="color: var(--accent-blue);">0</strong> 件</div>
+                <div>🔹 表記ゆれの統一: <strong id="modal-synonym-count" style="color: var(--accent-blue);">0</strong> 件</div>
+            </div>
+            <p style="font-size: 12.5px; color: var(--text-secondary); margin-bottom: 14px;">
+                現在の画面上の設定とどのように統合しますか？
+            </p>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button id="rules-modal-merge-btn" style="padding: 10px 16px; font-size: 13px; border-radius: 6px; border: none; background: var(--accent-blue); color: #ffffff; font-weight: 600; cursor: pointer; text-align: left; display: flex; flex-direction: column; gap: 2px;">
+                    <span>追加（マージ）して取り込む</span>
+                    <span style="font-size: 11px; opacity: 0.85; font-weight: normal;">現在登録されている単語を維持したまま、ファイルの内容を追加します</span>
+                </button>
+                <button id="rules-modal-overwrite-btn" style="padding: 10px 16px; font-size: 13px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-surface); color: var(--text-primary); font-weight: 600; cursor: pointer; text-align: left; display: flex; flex-direction: column; gap: 2px;">
+                    <span>上書き（置換）して取り込む</span>
+                    <span style="font-size: 11px; color: var(--text-muted); font-weight: normal;">現在の設定をすべてクリアし、ファイルの内容だけに置き換えます</span>
+                </button>
+            </div>
+            <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+                <button id="rules-modal-cancel-btn" style="padding: 6px 14px; font-size: 12px; border-radius: 6px; border: 1px solid var(--border-color); background: transparent; color: var(--text-muted); cursor: pointer;">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js?v=4.1"></script>
 </body>
 </html>
