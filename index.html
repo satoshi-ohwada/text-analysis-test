@@ -127,9 +127,18 @@
                     <!-- Dynamically populated via JS -->
                 </div>
 
-                <div id="cluster-count-group" style="display: none; margin-top: 10px; margin-bottom: 10px;">
-                    <label for="cluster-count">クラスター数 (K平均法):</label>
-                    <input type="number" id="cluster-count" min="2" max="8" value="3" class="select-control" style="width: 100%; box-sizing: border-box;">
+                <div id="cluster-count-group" style="display: none; margin-top: 10px; margin-bottom: 12px; padding: 10px 12px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <label for="cluster-count" style="font-weight: 600; font-size: 12.5px; color: var(--text-primary); margin-bottom: 0;">クラスター数 (K平均法):</label>
+                        <span id="cluster-auto-badge" style="font-size: 11px; color: var(--accent-blue); font-weight: 600;" title="データの分布形状（シルエット値・分散比等）から自動算出した初期推奨値です">自動推奨: 3</span>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <input type="number" id="cluster-count" min="2" max="8" value="3" class="select-control" style="flex: 1; box-sizing: border-box; font-size: 13px; font-weight: 600; text-align: center;">
+                        <button type="button" id="btn-cluster-reset" class="btn-subtle" style="font-size: 11px; padding: 4px 10px; white-space: nowrap; height: 32px;" title="自動算出された初期推奨値に戻します">推奨値に戻す</button>
+                    </div>
+                    <p style="font-size: 10.5px; color: var(--text-muted); margin-top: 6px; margin-bottom: 0; line-height: 1.35;">
+                        💡 図のまとまりを見ながら、必要に応じてクラスター数を微調整できます。
+                    </p>
                 </div>
 
                 <div id="lda-topic-count-group" style="display: none; margin-top: 10px; margin-bottom: 10px; padding: 12px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px;">

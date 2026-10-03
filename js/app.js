@@ -29,11 +29,17 @@ let pcaPoints = [];
 let rawPcaPoints = [];
 let pcaExplainedVar1 = '--'; // Variance explained by PC1 (%)
 let pcaExplainedVar2 = '--'; // Variance explained by PC2 (%)
+let pcaOptimalK = 3;
+let pcaUserK = 3;
+let pcaUserManual = false;
 
 // UMAP Scatter Plot State
 let umapPoints = [];
 let rawUmapPoints = [];
 let umapRandomSeed = 42;
+let umapOptimalK = 3;
+let umapUserK = 3;
+let umapUserManual = false;
 
 // LDA Topic Model State
 let currentLdaResult = null;
@@ -88,6 +94,8 @@ const displayType = document.getElementById('display-type');
 const methodDescription = document.getElementById('method-description');
 const clusterCountGroup = document.getElementById('cluster-count-group');
 const clusterCount = document.getElementById('cluster-count');
+const clusterAutoBadge = document.getElementById('cluster-auto-badge');
+const btnClusterReset = document.getElementById('btn-cluster-reset');
 
 // Compound Words Elements
 const newCompoundWordInput = document.getElementById('new-compound-word');
@@ -861,6 +869,10 @@ function loadTextAndTokenize(text) {
         return;
     }
     rawTextData = text;
+    pcaUserManual = false;
+    umapUserManual = false;
+    pcaUserK = null;
+    umapUserK = null;
     const lines = rawTextData.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     opinionLinesCount = lines.length;
 
@@ -1348,9 +1360,31 @@ redrawElements.forEach(elem => {
     });
 });
 
+function syncClusterUIForActiveView() {
+    if (!clusterCount) return;
+    const mode = displayType ? displayType.value : '';
+    let optimalK = 3;
+    let currentK = 3;
+
+    if (mode === 'pca') {
+        optimalK = pcaOptimalK || 3;
+        currentK = (pcaUserManual && pcaUserK) ? pcaUserK : optimalK;
+    } else if (mode === 'umap') {
+        optimalK = umapOptimalK || 3;
+        currentK = (umapUserManual && umapUserK) ? umapUserK : optimalK;
+    }
+
+    clusterCount.value = currentK;
+    if (clusterAutoBadge) {
+        clusterAutoBadge.textContent = `自動推奨: ${optimalK}`;
+        clusterAutoBadge.title = `${mode.toUpperCase()}のデータ分布形状（シルエット値・分散比等）から自動算出した初期推奨値です`;
+    }
+}
+
 function updateClusterCountGroupVisibility() {
     if (displayType && (displayType.value === 'pca' || displayType.value === 'umap')) {
-        clusterCountGroup.style.display = 'block';
+        if (clusterCountGroup) clusterCountGroup.style.display = 'block';
+        syncClusterUIForActiveView();
     } else if (clusterCountGroup) {
         clusterCountGroup.style.display = 'none';
     }
@@ -1497,30 +1531,58 @@ displayType.addEventListener('change', () => {
     }
 });
 
-function updateClusterAssignments(k) {
-    if (rawPcaPoints && rawPcaPoints.length > 0) {
+function updateClusterAssignments(k, targetMode = null) {
+    if ((!targetMode || targetMode === 'pca') && rawPcaPoints && rawPcaPoints.length > 0) {
         const assignments = runKMeans(rawPcaPoints, k);
         pcaPoints = rawPcaPoints.map((pt, i) => ({ ...pt, cluster: assignments[i] }));
     }
-    if (rawUmapPoints && rawUmapPoints.length > 0) {
+    if ((!targetMode || targetMode === 'umap') && rawUmapPoints && rawUmapPoints.length > 0) {
         const assignments = runKMeans(rawUmapPoints, k);
         umapPoints = rawUmapPoints.map((pt, i) => ({ ...pt, cluster: assignments[i] }));
     }
 }
 
+function handleClusterCountChange() {
+    if (!clusterCount || !rawTextData) return;
+    const newK = Math.max(2, Math.min(8, parseInt(clusterCount.value) || 3));
+    clusterCount.value = newK;
+
+    const mode = displayType ? displayType.value : '';
+    if (mode === 'pca') {
+        pcaUserK = newK;
+        pcaUserManual = true;
+        updateClusterAssignments(newK, 'pca');
+    } else if (mode === 'umap') {
+        umapUserK = newK;
+        umapUserManual = true;
+        updateClusterAssignments(newK, 'umap');
+    } else {
+        updateClusterAssignments(newK);
+    }
+    updateWordCloud();
+}
+
 // clusterCount slider: only re-draw (no full NLP re-parse)
 if (clusterCount) {
-    clusterCount.addEventListener('change', () => {
-        if (rawTextData) {
-            updateClusterAssignments(parseInt(clusterCount.value) || 3);
-            updateWordCloud();
+    clusterCount.addEventListener('change', handleClusterCountChange);
+    clusterCount.addEventListener('input', handleClusterCountChange);
+}
+
+if (btnClusterReset) {
+    btnClusterReset.addEventListener('click', () => {
+        const mode = displayType ? displayType.value : '';
+        if (mode === 'pca') {
+            pcaUserManual = false;
+            pcaUserK = pcaOptimalK;
+            clusterCount.value = pcaOptimalK;
+            updateClusterAssignments(pcaOptimalK, 'pca');
+        } else if (mode === 'umap') {
+            umapUserManual = false;
+            umapUserK = umapOptimalK;
+            clusterCount.value = umapOptimalK;
+            updateClusterAssignments(umapOptimalK, 'umap');
         }
-    });
-    clusterCount.addEventListener('input', () => {
-        if (rawTextData) {
-            updateClusterAssignments(parseInt(clusterCount.value) || 3);
-            updateWordCloud();
-        }
+        updateWordCloud();
     });
 }
 
@@ -1928,13 +1990,22 @@ cloudCanvas.addEventListener('dblclick', (e) => {
 // K-means Clustering Helper
 // Uses K-means++ initialization for better starting centroids,
 // and runs nRuns times, returning the trial with the lowest inertia (most stable result).
-function runKMeans(points, k, nRuns = 5) {
+function runKMeans(points, k, nRuns = 5, returnDetails = false) {
     const n = points.length;
     if (n <= k) {
-        return points.map((_, i) => i);
+        const assign = points.map((_, i) => i);
+        if (returnDetails) {
+            return {
+                assignments: assign,
+                inertia: 0,
+                centroids: points.map(p => ({ x: p.x, y: p.y }))
+            };
+        }
+        return assign;
     }
 
     let bestAssignments = null;
+    let bestCentroids = null;
     let bestInertia = Infinity;
 
     for (let run = 0; run < nRuns; run++) {
@@ -2019,10 +2090,176 @@ function runKMeans(points, k, nRuns = 5) {
         if (inertia < bestInertia) {
             bestInertia = inertia;
             bestAssignments = Array.from(assignments);
+            bestCentroids = centroids.map(c => ({ x: c.x, y: c.y }));
         }
     }
 
+    if (returnDetails) {
+        return {
+            assignments: bestAssignments,
+            inertia: bestInertia,
+            centroids: bestCentroids
+        };
+    }
     return bestAssignments;
+}
+
+// Automatic 2D Cluster Count Optimizer (PCA & UMAP)
+// Uses multi-criteria consensus: Silhouette analysis, Calinski-Harabasz index, and Davies-Bouldin index.
+function findOptimal2DClusterK(points, minK = 2, maxK = 6) {
+    const n = points.length;
+    if (n < 4) {
+        const fallbackK = Math.max(2, Math.min(n, minK));
+        return {
+            optimalK: fallbackK,
+            assignments: points.map((_, i) => i % fallbackK),
+            details: {}
+        };
+    }
+
+    const upperK = Math.min(maxK, Math.max(minK, Math.min(6, n - 1)));
+    const testedK = [];
+    for (let k = minK; k <= upperK; k++) testedK.push(k);
+
+    // Precompute pairwise 2D Euclidean distances
+    const distMatrix = new Float64Array(n * n);
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+            const dx = points[i].x - points[j].x;
+            const dy = points[i].y - points[j].y;
+            const d = Math.hypot(dx, dy);
+            distMatrix[i * n + j] = d;
+            distMatrix[j * n + i] = d;
+        }
+    }
+
+    const results = {};
+    let bestSilK = minK, maxSil = -Infinity;
+    let bestChK = minK, maxCh = -Infinity;
+    let bestDbK = minK, minDb = Infinity;
+
+    for (const k of testedK) {
+        const km = runKMeans(points, k, 5, true);
+        const assignments = km.assignments;
+        const centroids = km.centroids;
+        const inertia = km.inertia;
+
+        // 1. Silhouette score
+        const clusterSizes = new Int32Array(k);
+        for (let i = 0; i < n; i++) clusterSizes[assignments[i]]++;
+
+        let silSum = 0;
+        let silCount = 0;
+        for (let i = 0; i < n; i++) {
+            const ci = assignments[i];
+            if (clusterSizes[ci] <= 1) continue;
+
+            const distsToClusters = new Float64Array(k);
+            for (let j = 0; j < n; j++) {
+                if (i === j) continue;
+                distsToClusters[assignments[j]] += distMatrix[i * n + j];
+            }
+
+            const ai = distsToClusters[ci] / (clusterSizes[ci] - 1);
+            let bi = Infinity;
+            for (let c = 0; c < k; c++) {
+                if (c === ci || clusterSizes[c] === 0) continue;
+                const meanDist = distsToClusters[c] / clusterSizes[c];
+                if (meanDist < bi) bi = meanDist;
+            }
+
+            if (bi !== Infinity) {
+                const maxDist = Math.max(ai, bi);
+                silSum += maxDist === 0 ? 0 : (bi - ai) / maxDist;
+                silCount++;
+            }
+        }
+        const silScore = silCount > 0 ? silSum / silCount : 0;
+
+        // 2. Calinski-Harabasz Index
+        let overallX = 0, overallY = 0;
+        for (let i = 0; i < n; i++) {
+            overallX += points[i].x;
+            overallY += points[i].y;
+        }
+        overallX /= n;
+        overallY /= n;
+
+        let ssb = 0;
+        for (let c = 0; c < k; c++) {
+            if (clusterSizes[c] > 0) {
+                const dx = centroids[c].x - overallX;
+                const dy = centroids[c].y - overallY;
+                ssb += clusterSizes[c] * (dx * dx + dy * dy);
+            }
+        }
+        const ssw = Math.max(1e-10, inertia);
+        const chScore = (ssb / (k - 1)) / (ssw / (n - k));
+
+        // 3. Davies-Bouldin Index
+        const dispersions = new Float64Array(k);
+        for (let i = 0; i < n; i++) {
+            const c = assignments[i];
+            const dx = points[i].x - centroids[c].x;
+            const dy = points[i].y - centroids[c].y;
+            dispersions[c] += Math.hypot(dx, dy);
+        }
+        for (let c = 0; c < k; c++) {
+            if (clusterSizes[c] > 0) dispersions[c] /= clusterSizes[c];
+        }
+
+        let dbSum = 0;
+        let activeClusters = 0;
+        for (let i = 0; i < k; i++) {
+            if (clusterSizes[i] === 0) continue;
+            let maxR = -Infinity;
+            for (let j = 0; j < k; j++) {
+                if (i === j || clusterSizes[j] === 0) continue;
+                const dx = centroids[i].x - centroids[j].x;
+                const dy = centroids[i].y - centroids[j].y;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 1e-10) {
+                    const r = (dispersions[i] + dispersions[j]) / dist;
+                    if (r > maxR) maxR = r;
+                }
+            }
+            if (maxR !== -Infinity) {
+                dbSum += maxR;
+                activeClusters++;
+            }
+        }
+        const dbScore = activeClusters > 0 ? dbSum / activeClusters : Infinity;
+
+        results[k] = { k, sil: silScore, ch: chScore, db: dbScore, inertia, assignments };
+
+        if (silScore > maxSil) { maxSil = silScore; bestSilK = k; }
+        if (chScore > maxCh) { maxCh = chScore; bestChK = k; }
+        if (dbScore < minDb) { minDb = dbScore; bestDbK = k; }
+    }
+
+    // Voting among Silhouette, Calinski-Harabasz, and Davies-Bouldin
+    const votes = {};
+    [bestSilK, bestChK, bestDbK].forEach(k => {
+        votes[k] = (votes[k] || 0) + 1;
+    });
+
+    let bestK = minK;
+    let maxVotes = 0;
+    for (const [kStr, count] of Object.entries(votes)) {
+        const k = parseInt(kStr);
+        if (count > maxVotes) {
+            maxVotes = count;
+            bestK = k;
+        } else if (count === maxVotes) {
+            if (k === bestSilK) bestK = k; // Tie-break with Silhouette
+        }
+    }
+
+    return {
+        optimalK: bestK,
+        assignments: results[bestK].assignments,
+        details: { bestSilK, bestChK, bestDbK, results }
+    };
 }
 
 // CSV Exporter Helper
@@ -2656,17 +2893,22 @@ function processAndRender() {
             });
         }
         
-        const k = parseInt(clusterCount?.value) || 3;
-        const assignments = runKMeans(rawPoints, k);
-        
         rawPcaPoints = rawPoints;
-        pcaPoints = rawPoints.map((pt, i) => {
-            pt.cluster = assignments[i];
-            return pt;
-        });
+        const pcaOpt = findOptimal2DClusterK(rawPoints, 2, 6);
+        pcaOptimalK = pcaOpt.optimalK;
+        const activePcaK = (pcaUserManual && pcaUserK) ? pcaUserK : pcaOptimalK;
+        pcaUserK = activePcaK;
+        
+        if (activePcaK === pcaOptimalK && pcaOpt.assignments) {
+            pcaPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: pcaOpt.assignments[i] }));
+        } else {
+            const assignments = runKMeans(rawPoints, activePcaK);
+            pcaPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: assignments[i] }));
+        }
 
         // --- UMAP ANALYSIS & K-MEANS CLUSTERING ---
-        runUMAPAnalysis(pcaWords, coocCounts, docFreq, uniqueWordsPerLine, counts, rawPoints, k);
+        runUMAPAnalysis(pcaWords, coocCounts, docFreq, uniqueWordsPerLine, counts, rawPoints);
+        syncClusterUIForActiveView();
     } else {
         rawPcaPoints = [];
         pcaPoints = [];
@@ -3816,7 +4058,7 @@ function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThem
     const minCount = Math.min(...counts);
     const maxCount = Math.max(...counts);
     
-    const k = parseInt(clusterCount?.value) || 3;
+    const k = (pcaUserManual && pcaUserK) ? pcaUserK : (pcaOptimalK || parseInt(clusterCount?.value) || 3);
     const clusterPoints = Array.from({ length: k }, () => []);
     points.forEach(p => {
         if (p.cluster >= 0 && p.cluster < k) {
@@ -4103,11 +4345,17 @@ function runUMAPAnalysis(words, coocCounts, docFreq, uniqueWordsPerLine, counts,
     }
 
     rawUmapPoints = rawPoints;
-    const assignments = runKMeans(rawPoints, k);
-    umapPoints = rawPoints.map((pt, i) => {
-        pt.cluster = assignments[i];
-        return pt;
-    });
+    const umapOpt = findOptimal2DClusterK(rawPoints, 2, 6);
+    umapOptimalK = umapOpt.optimalK;
+    const activeUmapK = (umapUserManual && umapUserK) ? umapUserK : umapOptimalK;
+    umapUserK = activeUmapK;
+
+    if (activeUmapK === umapOptimalK && umapOpt.assignments) {
+        umapPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: umapOpt.assignments[i] }));
+    } else {
+        const assignments = runKMeans(rawPoints, activeUmapK);
+        umapPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: assignments[i] }));
+    }
 }
 
 // Helper to draw UMAP Legend on any canvas
@@ -4264,7 +4512,7 @@ function drawUMAPOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThe
     const minCount = Math.min(...counts);
     const maxCount = Math.max(...counts);
     
-    const k = parseInt(clusterCount?.value) || 3;
+    const k = (umapUserManual && umapUserK) ? umapUserK : (umapOptimalK || parseInt(clusterCount?.value) || 3);
     const clusterPoints = Array.from({ length: k }, () => []);
     points.forEach(p => {
         if (p.cluster >= 0 && p.cluster < k) {
@@ -4852,11 +5100,13 @@ function renderAnalysisSummary(mode, filteredList) {
 
     } else if (mode === 'pca') {
         // ① PCA用コメント
-        const k = parseInt(clusterCount?.value) || 3;
+        const currentK = (pcaUserManual && pcaUserK) ? pcaUserK : (pcaOptimalK || parseInt(clusterCount?.value) || 3);
+        const optK = pcaOptimalK || 3;
+        const recText = pcaUserManual && pcaUserK !== optK ? `（手動調整中 / 初期推奨値: ${optK}）` : `（分布から自動算出した推奨値: ${optK}）`;
         commentHtml = `
             <b>📊 この結果から読み取れること：</b><br>
             近くに配置された語ほど<b>似た文脈で使われる語</b>です。
-            ${k}色のグループに自動分類されています。<br>
+            ${currentK}色のグループに分類されています${recText}。<br>
             横軸(PC1)・縦軸(PC2)はそれぞれ回答全体の傾向をまとめた「主な方向性」を表します
             （寄与率が低くても、テキスト分析では正常です）。<br>
             <span style="color:var(--text-muted);">💡 点が離れているほど、他と違う文脈で使われる語です。共起ネットワークと合わせて見ると理解が深まります。</span>`;
@@ -4867,12 +5117,14 @@ function renderAnalysisSummary(mode, filteredList) {
 
     } else if (mode === 'umap') {
         // ① UMAP用コメント
-        const k = parseInt(clusterCount?.value) || 3;
+        const currentK = (umapUserManual && umapUserK) ? umapUserK : (umapOptimalK || parseInt(clusterCount?.value) || 3);
+        const optK = umapOptimalK || 3;
+        const recText = umapUserManual && umapUserK !== optK ? `（手動調整中 / 初期推奨値: ${optK}）` : `（分布から自動算出した推奨値: ${optK}）`;
         commentHtml = `
             <b>📊 この結果から読み取れること：</b><br>
             非線形多様体学習（UMAP）により、高次元の単語共起関係を圧縮して可視化しています。<br>
             ぎゅっと集まっている塊は<b>同じ文脈・話題で高頻度に結びつく単語群（テーマの核）</b>です。
-            ${k}色のグループに自動分類されています。<br>
+            ${currentK}色のグループに分類されています${recText}。<br>
             <span style="color:var(--text-muted);">💡 PCA（主成分分析）に比べ、局所的な類似度が強調され、クラスター同士の「隙間・分離」が明確になります。語をクリックすると用例(KWIC)を確認できます。</span>`;
         nextHtml = `
             <b>👉 次のステップ：</b>
