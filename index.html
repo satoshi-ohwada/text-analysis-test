@@ -145,6 +145,29 @@
                     </label>
                 </div>
 
+                <!-- Co-occurrence Network Specific Options (Proposal 1 & 2) -->
+                <div id="network-options-group" style="display: none; margin-top: 10px; margin-bottom: 12px; padding: 12px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px;">
+                    <div style="font-weight: 600; margin-bottom: 8px; color: var(--text-primary); font-size: 12.5px; display: flex; align-items: center; gap: 6px;">
+                        <span>🕸️ 共起ネットワークの表示設定</span>
+                    </div>
+                    <div class="checkbox-group column-layout" style="gap: 8px;">
+                        <label class="checkbox-container" style="font-size: 12px; color: var(--text-primary);" title="エッジが足切りされて孤立する重要頻出語に対し、最も共起が強い相手と最低1本はエッジを接続します">
+                            <input type="checkbox" id="network-min-edge-check" checked>
+                            <span>重要語の最低1本接続 (案1: 孤立防止)</span>
+                        </label>
+                        <p style="font-size: 10.5px; color: var(--text-muted); margin-left: 22px; margin-top: -4px; margin-bottom: 4px; line-height: 1.35;">
+                            頻出語が他の強いペアに押し出されて線が消えるのを防ぎ、最も関係の深い語と点線で繋ぎます。
+                        </p>
+
+                        <label class="checkbox-container" style="font-size: 12px; color: var(--text-primary);" title="線が引かれなかった頻出語も作図対象から除外せず、画面の周囲に孤立ノードとして配置します">
+                            <input type="checkbox" id="network-show-isolated-check" checked>
+                            <span>孤立ノードも作図する (案2: 単独語の表示)</span>
+                        </label>
+                        <p style="font-size: 10.5px; color: var(--text-muted); margin-left: 22px; margin-top: -4px; margin-bottom: 2px; line-height: 1.35;">
+                            共起相手のいない単語も除外せず、独立した話題としてノードを描画します。
+                        </p>
+                    </div>
+                </div>
 
                 <label for="color-theme">カラーテーマ:</label>
                 <select id="color-theme" class="select-control">

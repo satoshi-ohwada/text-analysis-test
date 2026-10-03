@@ -78,6 +78,9 @@ const maxWordsVal = document.getElementById('max-words-val');
 const networkThresholdGroup = document.getElementById('network-threshold-group');
 const networkThresholdRange = document.getElementById('network-threshold-range');
 const networkThresholdVal = document.getElementById('network-threshold-val');
+const networkOptionsGroup = document.getElementById('network-options-group');
+const networkMinEdgeCheck = document.getElementById('network-min-edge-check');
+const networkShowIsolatedCheck = document.getElementById('network-show-isolated-check');
 const colorTheme = document.getElementById('color-theme');
 const fontSelect = document.getElementById('font-select');
 const shapeCircle = document.getElementById('shape-circle');
@@ -1324,7 +1327,7 @@ if (networkThresholdRange) {
 }
 
 // Render triggers for filters
-[posNoun, posVerb, posAdj, posAdv, mergeNounsCheckbox, document.getElementById('ranking-method')].forEach(elem => {
+[posNoun, posVerb, posAdj, posAdv, mergeNounsCheckbox, document.getElementById('ranking-method'), networkMinEdgeCheck, networkShowIsolatedCheck].forEach(elem => {
     if (!elem) return;
     elem.addEventListener('change', () => {
         if (rawTextData) {
@@ -1372,8 +1375,10 @@ function updateClusterCountGroupVisibility() {
     }
     if (displayType && displayType.value === 'network') {
         if (networkThresholdGroup) networkThresholdGroup.style.display = 'none'; // hidden for now as per user request
+        if (networkOptionsGroup) networkOptionsGroup.style.display = 'block';
     } else {
         if (networkThresholdGroup) networkThresholdGroup.style.display = 'none';
+        if (networkOptionsGroup) networkOptionsGroup.style.display = 'none';
     }
 
     if (methodDescription && displayType) {
@@ -1648,7 +1653,9 @@ cloudCanvas.addEventListener('mousemove', (e) => {
                 const tInfo = currentLdaResult.wordTopics[hoveredNode.id];
                 ldaTopicText = `<br><span style="color: var(--accent-blue); font-weight: 600;">所属トピック: ${tInfo.label} (${(tInfo.prob * 100).toFixed(0)}%)</span>`;
             }
-            const connText = connections ? `<br>主な共起語: ${connections}` : '';
+            const connText = connections 
+                ? `<br>主な共起語: ${connections}` 
+                : `<br><span style="color: #F59E0B; font-weight: 500;">(共起関係のない孤立語)</span>`;
             tooltip.innerHTML = `<strong>${hoveredNode.id}</strong><br>出現回数: ${hoveredNode.count}回<br>グループ: ${hoveredNode.communityLabel}${ldaTopicText}${connText}<br><small style="color: var(--text-muted)">ダブルクリックで除外</small>`;
             cloudCanvas.style.cursor = 'pointer';
         } else {
@@ -2174,8 +2181,8 @@ function mergeConsecutiveNouns(tokens) {
     
     const isNounForMerge = (t) => {
         if (!t) return false;
-        // Don't merge over user-defined compound words (act as boundaries)
-        if (t.pos_detail_1 === '複合語') return false;
+        // Don't merge over user-defined compound words or synonym replaced words (act as boundaries)
+        if (t.pos_detail_1 === '複合語' || t.pos_detail_1 === '同義語') return false;
         
         // Include Nouns and Prefixes. Exclude non-independent and pronouns.
         if (t.pos === '名詞' || t.pos === '接頭詞') {
@@ -2400,21 +2407,81 @@ function processAndRender() {
     // Limit to exactly 1.0 * maxWords to naturally separate the graph into disjoint communities
     const topEdges = rawEdges.slice(0, Math.round(maxWords * 1.0));
 
+    // [Proposal 1: 最低1本エッジ保証（救済リンク）]
+    const ensureMinEdge = networkMinEdgeCheck ? networkMinEdgeCheck.checked : true;
+    const connectedWordIds = new Set();
+    topEdges.forEach(e => {
+        connectedWordIds.add(e.sourceId);
+        connectedWordIds.add(e.targetId);
+    });
+
+    if (ensureMinEdge) {
+        filteredList.forEach(item => {
+            const w = item.text;
+            if (!connectedWordIds.has(w)) {
+                // Find strongest co-occurring partner among allowed frequent words
+                let bestPartner = null;
+                let bestJaccard = -1;
+                let bestCooc = 0;
+
+                filteredList.forEach(otherItem => {
+                    const otherW = otherItem.text;
+                    if (w === otherW) return;
+                    const key1 = `${w}|||${otherW}`;
+                    const key2 = `${otherW}|||${w}`;
+                    const fAB = coocCounts[key1] || coocCounts[key2] || 0;
+                    if (fAB > 0) {
+                        const cA = Math.max(docFreq[w] || 0, fAB);
+                        const cB = Math.max(docFreq[otherW] || 0, fAB);
+                        const denom = cA + cB - fAB;
+                        const jaccard = denom > 0 ? fAB / denom : 0;
+                        if (jaccard > bestJaccard || (jaccard === bestJaccard && fAB > bestCooc)) {
+                            bestJaccard = jaccard;
+                            bestCooc = fAB;
+                            bestPartner = otherW;
+                        }
+                    }
+                });
+
+                if (bestPartner && bestJaccard > 0) {
+                    topEdges.push({
+                        sourceId: w,
+                        targetId: bestPartner,
+                        weight: Math.max(0.01, bestJaccard),
+                        isRescueEdge: true
+                    });
+                    connectedWordIds.add(w);
+                    connectedWordIds.add(bestPartner);
+                }
+            }
+        });
+    }
+
+    // [Proposal 2: 孤立ノード表示（線のない語も作図対象に含める）]
+    const showIsolatedNodes = networkShowIsolatedCheck ? networkShowIsolatedCheck.checked : true;
     const networkNodesSet = new Set();
     topEdges.forEach(e => {
         if (networkNodesSet.size < maxWords) networkNodesSet.add(e.sourceId);
         if (networkNodesSet.size < maxWords) networkNodesSet.add(e.targetId);
     });
 
-    // NOTE: We intentionally DO NOT add isolated nodes. 
-    // If a word has no strong connections, it is hidden to keep the network clean.
+    if (showIsolatedNodes) {
+        filteredList.forEach(item => {
+            if (networkNodesSet.size < maxWords) {
+                networkNodesSet.add(item.text);
+            }
+        });
+    }
+
     networkExcludedWords = filteredList.filter(item => !networkNodesSet.has(item.text));
 
     const tempNodes = Array.from(networkNodesSet).map(word => {
+        const hasEdge = topEdges.some(e => e.sourceId === word || e.targetId === word);
         return {
             id: word,
             count: counts[word] || 1,
             community: word,
+            isIsolated: !hasEdge,
             x: cloudCanvas.width / 2 + (Math.random() - 0.5) * 200,
             y: cloudCanvas.height / 2 + (Math.random() - 0.5) * 200,
             vx: 0,
@@ -2440,7 +2507,12 @@ function processAndRender() {
         .map(e => {
             const srcNode = nodesList.find(n => n.id === e.sourceId);
             const tgtNode = nodesList.find(n => n.id === e.targetId);
-            return { source: srcNode, target: tgtNode, weight: e.weight };
+            return {
+                source: srcNode,
+                target: tgtNode,
+                weight: e.weight,
+                isRescueEdge: !!e.isRescueEdge
+            };
         });
 
     for (let iter = 0; iter < 15; iter++) {
@@ -2480,7 +2552,9 @@ function processAndRender() {
     nodesList.forEach(node => {
         const commIndex = sortedCommunities.indexOf(node.community);
         node.communityIndex = commIndex >= 0 ? commIndex : 0;
-        node.communityLabel = `グループ ${String.fromCharCode(65 + (node.communityIndex % 26))}`;
+        node.communityLabel = node.isIsolated
+            ? '孤立語 (独立話題)'
+            : `グループ ${String.fromCharCode(65 + (node.communityIndex % 26))}`;
     });
 
     networkNodes = nodesList;
@@ -3547,10 +3621,18 @@ function drawNetworkOnCanvas(canvas, nodes, edges, selectedTheme, selectedFont, 
             opacity = 0.15 + (edge.weight * 0.7);
         }
         
+        if (edge.isRescueEdge) {
+            ctx.setLineDash([4 * scaleFactor, 3 * scaleFactor]);
+            opacity = Math.max(0.25, opacity * 0.75);
+        } else {
+            ctx.setLineDash([]);
+        }
+
         ctx.strokeStyle = `${strokeColor}${opacity})`;
         ctx.lineWidth = thickness * scaleFactor;
         ctx.stroke();
     });
+    ctx.setLineDash([]);
 
     // 2. Draw word nodes
     nodes.forEach(node => {
@@ -3561,11 +3643,19 @@ function drawNetworkOnCanvas(canvas, nodes, edges, selectedTheme, selectedFont, 
         ctx.fillStyle = color;
         ctx.fill();
         
-        ctx.strokeStyle = selectedTheme === 'pure-bw' 
-            ? '#000000' 
-            : (isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.3)');
-        ctx.lineWidth = (selectedTheme === 'pure-bw' ? 2 : 1.5) * scaleFactor;
+        if (node.isIsolated) {
+            ctx.setLineDash([3 * scaleFactor, 2 * scaleFactor]);
+            ctx.strokeStyle = '#F59E0B'; // Distinctive warm dashed border for isolated node
+            ctx.lineWidth = 2 * scaleFactor;
+        } else {
+            ctx.setLineDash([]);
+            ctx.strokeStyle = selectedTheme === 'pure-bw' 
+                ? '#000000' 
+                : (isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.3)');
+            ctx.lineWidth = (selectedTheme === 'pure-bw' ? 2 : 1.5) * scaleFactor;
+        }
         ctx.stroke();
+        ctx.setLineDash([]);
         
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
