@@ -150,14 +150,47 @@ label {
     height: 16px;
 }
 
-/* Stopword Manager Styles */
+/* Stopword & Rule Manager Styles */
 .stopword-input-container {
     display: flex;
-    gap: 8px;
+    align-items: center;
+    gap: 6px;
+}
+
+.stopword-input-container input.select-control {
+    height: 36px;
+    padding: 0 10px;
+    font-size: 13px;
+    box-sizing: border-box;
+}
+
+.stopword-input-container .btn {
+    height: 36px;
+    padding: 0 14px;
+    font-size: 12.5px;
+    white-space: nowrap;
+    box-sizing: border-box;
+    flex-shrink: 0;
 }
 
 .inline-input {
     flex-grow: 1;
+}
+
+.heading-action-link {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: normal;
+    cursor: pointer;
+    text-decoration: underline;
+    transition: color 0.15s ease;
+    padding: 0 2px;
+}
+
+.heading-action-link:hover {
+    color: #EF4444;
 }
 
 .stopword-tags {

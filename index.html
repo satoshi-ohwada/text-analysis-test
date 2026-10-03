@@ -244,7 +244,10 @@
             </div>
 
             <div class="control-group">
-                <h3>4. 複合語（一つにまとめる単語）</h3>
+                <h3 style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>4. 複合語（一つにまとめる単語）</span>
+                    <button type="button" class="heading-action-link" id="clear-compound-btn" title="追加された複合語をすべてクリアします">クリア</button>
+                </h3>
                 <div class="stopword-input-container">
                     <input type="text" id="new-compound-word" placeholder="一つにまとめる単語を入力" class="select-control inline-input">
                     <button class="btn btn-secondary" id="add-compound-word-btn">追加</button>
@@ -255,7 +258,10 @@
             </div>
 
             <div class="control-group">
-                <h3>5. 除外ワード（ストップワード）</h3>
+                <h3 style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>5. 除外ワード（ストップワード）</span>
+                    <button type="button" class="heading-action-link" id="reset-stopwords-btn" title="画面上で追加した除外ワードをクリアします（標準の除外リストは維持）">初期状態に戻す</button>
+                </h3>
                 <div class="stopword-input-container">
                     <input type="text" id="new-stopword" placeholder="除外する単語を入力" class="select-control inline-input">
                     <button class="btn btn-secondary" id="add-stopword-btn">追加</button>
@@ -263,16 +269,18 @@
                 <div class="stopword-tags" id="stopwords-list">
                     <!-- Stopword tags will be dynamically populated here -->
                 </div>
-                <button class="btn btn-outline-w btn-xs" id="reset-stopwords-btn">初期状態に戻す</button>
             </div>
 
             <div class="control-group">
-                <h3>6. 表記ゆれの統一（置換ルール）</h3>
-                <p style="font-size:11.5px; color:var(--text-muted); margin-bottom:8px;">「イラン情勢」→「中東情勢」のように語を統一します。</p>
-                <div class="stopword-input-container" style="display: flex; gap: 4px;">
-                    <input type="text" id="replace-from" placeholder="元の語" class="select-control inline-input" style="flex:1; width:50%;">
-                    <span style="display:flex; align-items:center; color:var(--text-muted);">→</span>
-                    <input type="text" id="replace-to" placeholder="統一後" class="select-control inline-input" style="flex:1; width:50%;">
+                <h3 style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>6. 表記ゆれの統一（置換ルール）</span>
+                    <button type="button" class="heading-action-link" id="clear-synonyms-btn" title="登録されている置換ルールをすべてクリアします">クリア</button>
+                </h3>
+                <p style="font-size:11.5px; color:var(--text-muted); margin-bottom:4px;">「イラン情勢」→「中東情勢」のように語を統一します。</p>
+                <div class="stopword-input-container">
+                    <input type="text" id="replace-from" placeholder="元の語" class="select-control inline-input" style="flex: 1; min-width: 0;">
+                    <span style="color: var(--text-muted); font-size: 13px; flex-shrink: 0; padding: 0 2px;">→</span>
+                    <input type="text" id="replace-to" placeholder="統一後" class="select-control inline-input" style="flex: 1; min-width: 0;">
                     <button class="btn btn-secondary" id="add-replace-btn">追加</button>
                 </div>
                 <div class="stopword-tags" id="replace-words-list">

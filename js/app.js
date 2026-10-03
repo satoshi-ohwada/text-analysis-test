@@ -105,9 +105,11 @@ const btnClusterReset = document.getElementById('btn-cluster-reset');
 // Compound Words Elements
 const newCompoundWordInput = document.getElementById('new-compound-word');
 const addCompoundWordBtn = document.getElementById('add-compound-word-btn');
+const clearCompoundBtn = document.getElementById('clear-compound-btn');
 const replaceFromInput = document.getElementById('replace-from');
 const replaceToInput = document.getElementById('replace-to');
 const addReplaceBtn = document.getElementById('add-replace-btn');
+const clearSynonymsBtn = document.getElementById('clear-synonyms-btn');
 const replaceWordsList = document.getElementById('replace-words-list');
 const compoundWordsList = document.getElementById('compound-words-list');
 let customCompoundWords = new Set(); // User-defined compound words
@@ -983,20 +985,56 @@ newStopwordInput.addEventListener('keypress', (e) => {
     }
 });
 
-resetStopwordsBtn.addEventListener('click', () => {
-    if (customStopWords.size === 0) {
-        alert("追加された除外ワードはありません。");
-        return;
-    }
-    if (confirm("画面上で追加した除外ワードをすべてクリアしますか？（標準の除外リストは維持されます）")) {
-        customStopWords.clear();
-        saveSettings();
-        renderStopWords();
-        if (rawTextData) {
-            processAndRender();
+if (clearCompoundBtn) {
+    clearCompoundBtn.addEventListener('click', () => {
+        if (customCompoundWords.size === 0) {
+            alert("登録されている複合語はありません。");
+            return;
         }
-    }
-});
+        if (confirm("登録されている複合語をすべてクリアしますか？")) {
+            customCompoundWords.clear();
+            saveSettings();
+            renderCompoundWords();
+            if (rawTextData) {
+                processAndRender();
+            }
+        }
+    });
+}
+
+if (resetStopwordsBtn) {
+    resetStopwordsBtn.addEventListener('click', () => {
+        if (customStopWords.size === 0) {
+            alert("追加された除外ワードはありません。");
+            return;
+        }
+        if (confirm("画面上で追加した除外ワードをすべてクリアしますか？（標準の除外リストは維持されます）")) {
+            customStopWords.clear();
+            saveSettings();
+            renderStopWords();
+            if (rawTextData) {
+                processAndRender();
+            }
+        }
+    });
+}
+
+if (clearSynonymsBtn) {
+    clearSynonymsBtn.addEventListener('click', () => {
+        if (customSynonymRules.size === 0) {
+            alert("登録されている置換ルールはありません。");
+            return;
+        }
+        if (confirm("登録されている置換ルールをすべてクリアしますか？")) {
+            customSynonymRules.clear();
+            saveSettings();
+            renderSynonymRules();
+            if (rawTextData) {
+                processAndRender();
+            }
+        }
+    });
+}
 
 dropZone.addEventListener('dragover', (e) => {
     e.preventDefault();
