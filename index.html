@@ -380,16 +380,35 @@
                 <div class="empty-state" id="empty-state">
                     <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                     <h2>データを読み込むと分析が始まります</h2>
-                    <p style="max-width: 380px; line-height: 1.7; color: var(--text-muted); font-size: 13px;">
+                    <p style="max-width: 420px; line-height: 1.7; color: var(--text-muted); font-size: 13px;">
                         左パネルからテキストファイルをアップロードするか、<br>
                         まずは <strong style="color: var(--text-secondary)">「デモデータを読み込む」</strong> を試してみましょう。
                     </p>
-                    <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 8px; text-align: left; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 16px 20px; max-width: 380px;">
-                        <div style="font-size: 11px; font-weight: 700; color: var(--accent-blue); margin-bottom: 4px; letter-spacing: 0.05em;">💡 分析の流れ（おすすめの順番）</div>
-                        <div style="font-size: 11.5px; color: var(--text-secondary); display: flex; gap: 10px; align-items: flex-start;"><span style="color: var(--accent-blue); font-weight: 700; flex-shrink:0;">①</span><span><strong style="color:var(--text-primary)">ワードクラウド</strong>で全体のキーワードを把握する</span></div>
-                        <div style="font-size: 11.5px; color: var(--text-secondary); display: flex; gap: 10px; align-items: flex-start;"><span style="color: var(--accent-blue); font-weight: 700; flex-shrink:0;">②</span><span><strong style="color:var(--text-primary)">横棒グラフ</strong>で頻出語を数値で確認する</span></div>
-                        <div style="font-size: 11.5px; color: var(--text-secondary); display: flex; gap: 10px; align-items: flex-start;"><span style="color: var(--accent-blue); font-weight: 700; flex-shrink:0;">③</span><span><strong style="color:var(--text-primary)">共起ネットワーク</strong>で語の関係とテーマを発見する ⬅ ここが核心</span></div>
-                        <div style="font-size: 11.5px; color: var(--text-secondary); display: flex; gap: 10px; align-items: flex-start;"><span style="color: var(--accent-blue); font-weight: 700; flex-shrink:0;">④</span><span><strong style="color:var(--text-primary)">PCA散布図</strong>でテーマのまとまりを俯瞰する</span></div>
+                    <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 8px; text-align: left; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 16px 20px; max-width: 450px;">
+                        <div style="font-size: 11px; font-weight: 700; color: var(--accent-blue); margin-bottom: 2px; letter-spacing: 0.05em;">💡 分析の流れ（おすすめの進め方）</div>
+                        <div style="font-size: 11.5px; color: var(--text-secondary); display: flex; gap: 10px; align-items: flex-start;">
+                            <span style="color: var(--accent-blue); font-weight: 700; flex-shrink:0;">①</span>
+                            <span><strong style="color:var(--text-primary)">ワードクラウド / 横棒グラフ</strong>で全体のキーワードや特徴語(TF-IDF)を把握</span>
+                        </div>
+                        <div style="font-size: 11.5px; color: var(--text-secondary); display: flex; gap: 10px; align-items: flex-start;">
+                            <span style="color: var(--accent-blue); font-weight: 700; flex-shrink:0;">②</span>
+                            <span><strong style="color:var(--text-primary)">共起ネットワーク</strong>で語の結びつきや話題グループを発見 <span style="font-size: 10.5px; color: var(--accent-blue); font-weight: 600;">⬅ 分析の核心</span></span>
+                        </div>
+                        <div style="font-size: 11.5px; color: var(--text-secondary); display: flex; gap: 10px; align-items: flex-start;">
+                            <span style="color: var(--accent-blue); font-weight: 700; flex-shrink:0;">③</span>
+                            <span><strong style="color:var(--text-primary)">コロケーション (連語)</strong>で具体的な言い回しや定型フレーズを調査</span>
+                        </div>
+                        <div style="font-size: 11.5px; color: var(--text-secondary); display: flex; gap: 10px; align-items: flex-start;">
+                            <span style="color: var(--accent-blue); font-weight: 700; flex-shrink:0;">④</span>
+                            <span><strong style="color:var(--text-primary)">トピック分析 (LDA)</strong>で潜在的な話題テーマと代表語を自動分類</span>
+                        </div>
+                        <div style="font-size: 11.5px; color: var(--text-secondary); display: flex; gap: 10px; align-items: flex-start;">
+                            <span style="color: var(--accent-blue); font-weight: 700; flex-shrink:0;">⑤</span>
+                            <span><strong style="color:var(--text-primary)">多変量解析 (PCA / UMAP)</strong>で似た文脈の単語のまとまりを多角的に俯瞰</span>
+                        </div>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.08); display: flex; gap: 6px; align-items: center;">
+                            <span>🔍</span><span>気になった語をクリックすると、いつでも<strong style="color:var(--text-secondary)">KWIC（実際の文中の使われ方）</strong>を確認できます</span>
+                        </div>
                     </div>
                 </div>
                 <!-- Custom Tooltip for word frequencies -->
