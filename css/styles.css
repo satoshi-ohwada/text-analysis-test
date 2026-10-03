@@ -491,6 +491,27 @@ textarea {
     color: var(--text-primary);
 }
 
+/* Network Excluded Words Tag */
+.excluded-word-tag {
+    background: var(--bg-element);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11.5px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.15s ease;
+}
+
+.excluded-word-tag:hover {
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+    background: rgba(59, 130, 246, 0.12);
+}
+
 /* Stats Bar */
 .stats-bar {
     height: 48px;
