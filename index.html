@@ -304,16 +304,33 @@
 
                     <span style="border-left: 1px solid var(--border-color); height: 18px; margin: 0 2px;"></span>
 
-                    <!-- Data export actions -->
-                    <button class="btn btn-secondary" id="export-words-csv-btn" style="height: 36px; padding: 0 10px; font-size: 12px;" title="単語の出現頻度・TF-IDF一覧をCSV保存" disabled>
-                        CSV (単語)
-                    </button>
-                    <button class="btn btn-secondary" id="export-pairs-csv-btn" style="height: 36px; padding: 0 10px; font-size: 12px;" title="単語同士の共起・Jaccard係数一覧をCSV保存" disabled>
-                        CSV (共起)
-                    </button>
-                    <button class="btn btn-secondary" id="export-ngram-csv-btn" style="height: 36px; padding: 0 10px; font-size: 12px;" title="N-gramコロケーション一覧をCSV保存" disabled>
-                        CSV (連語)
-                    </button>
+                    <!-- Consolidated CSV Export Dropdown (Proposal 1) -->
+                    <div class="csv-dropdown-wrapper" style="position: relative; display: inline-block;">
+                        <button class="btn btn-secondary" id="export-csv-dropdown-btn" style="height: 36px; padding: 0 11px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px;" title="分析データをCSV形式でダウンロード" disabled>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                            <span>CSV出力</span>
+                            <svg id="export-csv-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.2s ease;"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        </button>
+                        <div id="export-csv-menu" style="display: none; position: absolute; top: calc(100% + 6px); right: 0; min-width: 250px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5), 0 8px 10px -6px rgba(0,0,0,0.3); padding: 6px; z-index: 1000;">
+                            <button type="button" class="csv-menu-item" id="export-words-csv-btn">
+                                <span class="csv-item-title"><span style="font-size: 14px;">📄</span> 単語一覧 (出現頻度・TF-IDF)</span>
+                                <span class="csv-item-desc">各単語の出現回数と所属クラスタ</span>
+                            </button>
+                            <button type="button" class="csv-menu-item" id="export-pairs-csv-btn">
+                                <span class="csv-item-title"><span style="font-size: 14px;">🔗</span> 共起ペア (関連性・Jaccard)</span>
+                                <span class="csv-item-desc">単語同士の同時出現と結びつきの強さ</span>
+                            </button>
+                            <button type="button" class="csv-menu-item" id="export-ngram-csv-btn">
+                                <span class="csv-item-title"><span style="font-size: 14px;">💬</span> 連語 (コロケーション定型句)</span>
+                                <span class="csv-item-desc">頻出する言い回し・定型フレーズ</span>
+                            </button>
+                            <div style="border-top: 1px solid var(--border-color); margin: 5px 0;"></div>
+                            <button type="button" class="csv-menu-item" id="export-all-csv-btn">
+                                <span class="csv-item-title" style="color: var(--accent-blue);"><span style="font-size: 14px;">📦</span> 3種類すべて一括保存</span>
+                                <span class="csv-item-desc">上記3つのCSVをまとめてダウンロード</span>
+                            </button>
+                        </div>
+                    </div>
                     
                     <span style="border-left: 1px solid var(--border-color); height: 18px; margin: 0 2px;"></span>
 

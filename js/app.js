@@ -123,9 +123,13 @@ const downloadTemplateBtn = document.getElementById('download-template-btn');
 const clearAllRulesBtn = document.getElementById('clear-all-rules-btn');
 
 // Export & Relayout Action Buttons
+const exportCsvDropdownBtn = document.getElementById('export-csv-dropdown-btn');
+const exportCsvMenu = document.getElementById('export-csv-menu');
+const exportCsvChevron = document.getElementById('export-csv-chevron');
 const exportWordsCsvBtn = document.getElementById('export-words-csv-btn');
 const exportPairsCsvBtn = document.getElementById('export-pairs-csv-btn');
 const exportNgramCsvBtn = document.getElementById('export-ngram-csv-btn');
+const exportAllCsvBtn = document.getElementById('export-all-csv-btn');
 const relayoutBtn = document.getElementById('relayout-btn');
 const sidebarRelayoutBtn = document.getElementById('sidebar-relayout-btn');
 let isForceRelayout = false;
@@ -2278,56 +2282,94 @@ function downloadCSV(filename, csvContent) {
     }
 }
 
-// Instantly download words list using cached counts (fixed POS filter bug)
-exportWordsCsvBtn.addEventListener('click', () => {
-    if (wordFrequencies.length === 0) return;
-    
-    const isUmapMode = displayType && displayType.value === 'umap';
-    const activePoints = isUmapMode ? umapPoints : pcaPoints;
+// --- CSV Export Dropdown Toggle & Close Logic ---
+function closeCsvDropdown() {
+    if (exportCsvMenu) exportCsvMenu.style.display = 'none';
+    if (exportCsvChevron) exportCsvChevron.style.transform = 'rotate(0deg)';
+}
 
-    let csv = "単語,出現回数,特徴度 (TF-IDF),クラスターID\n";
-    wordFrequencies.forEach(item => {
-        const pt = activePoints.find(p => p.word === item.text);
-        const clusterId = (pt && pt.cluster !== undefined && pt.cluster >= 0) ? `C${pt.cluster + 1}` : "-";
-        const escapedWord = item.text.includes('"') ? item.text.replace(/"/g, '""') : item.text;
-        csv += `"${escapedWord}",${item.count},${item.tfidf.toFixed(4)},${clusterId}\n`;
-    });
-    
-    downloadCSV("word_frequency_metrics.csv", csv);
+function toggleCsvDropdown(e) {
+    if (e) e.stopPropagation();
+    if (!exportCsvMenu || (exportCsvDropdownBtn && exportCsvDropdownBtn.disabled)) return;
+    const isShowing = exportCsvMenu.style.display === 'block';
+    if (isShowing) {
+        closeCsvDropdown();
+    } else {
+        exportCsvMenu.style.display = 'block';
+        if (exportCsvChevron) exportCsvChevron.style.transform = 'rotate(180deg)';
+    }
+}
+
+if (exportCsvDropdownBtn) {
+    exportCsvDropdownBtn.addEventListener('click', toggleCsvDropdown);
+}
+
+document.addEventListener('click', (e) => {
+    if (exportCsvMenu && exportCsvMenu.style.display === 'block') {
+        const wrapper = document.querySelector('.csv-dropdown-wrapper');
+        if (wrapper && !wrapper.contains(e.target)) {
+            closeCsvDropdown();
+        }
+    }
 });
+
+// Instantly download words list using cached counts (fixed POS filter bug)
+if (exportWordsCsvBtn) {
+    exportWordsCsvBtn.addEventListener('click', () => {
+        closeCsvDropdown();
+        if (wordFrequencies.length === 0) return;
+        
+        const isUmapMode = displayType && displayType.value === 'umap';
+        const activePoints = isUmapMode ? umapPoints : pcaPoints;
+
+        let csv = "単語,出現回数,特徴度 (TF-IDF),クラスターID\n";
+        wordFrequencies.forEach(item => {
+            const pt = activePoints.find(p => p.word === item.text);
+            const clusterId = (pt && pt.cluster !== undefined && pt.cluster >= 0) ? `C${pt.cluster + 1}` : "-";
+            const escapedWord = item.text.includes('"') ? item.text.replace(/"/g, '""') : item.text;
+            csv += `"${escapedWord}",${item.count},${item.tfidf.toFixed(4)},${clusterId}\n`;
+        });
+        
+        downloadCSV("word_frequency_metrics.csv", csv);
+    });
+}
 
 // Instantly download co-occurrence pairs matching user checkboxes (no redundant tokenizing)
-exportPairsCsvBtn.addEventListener('click', () => {
-    if (wordFrequencies.length === 0) return;
-    
-    let csv = "単語A,単語B,共起回数,共起の強さ (Jaccard係数)\n";
-    const pairs = [];
-    
-    Object.entries(currentAnalysisCoocCounts).forEach(([key, fAB]) => {
-        const [w1, w2] = key.split('|||');
-        // Use document frequency (not raw count) for correct Jaccard denominator
-        const cA = Math.max(currentAnalysisDocFreq[w1] || 0, fAB);
-        const cB = Math.max(currentAnalysisDocFreq[w2] || 0, fAB);
-        const denom = cA + cB - fAB;
-        const jaccard = denom > 0 ? Math.max(0, Math.min(1.0, fAB / denom)) : 0;
-        if (jaccard > 0.01) {
-            pairs.push({ w1, w2, fAB, jaccard });
-        }
+if (exportPairsCsvBtn) {
+    exportPairsCsvBtn.addEventListener('click', () => {
+        closeCsvDropdown();
+        if (wordFrequencies.length === 0) return;
+        
+        let csv = "単語A,単語B,共起回数,共起の強さ (Jaccard係数)\n";
+        const pairs = [];
+        
+        Object.entries(currentAnalysisCoocCounts).forEach(([key, fAB]) => {
+            const [w1, w2] = key.split('|||');
+            // Use document frequency (not raw count) for correct Jaccard denominator
+            const cA = Math.max(currentAnalysisDocFreq[w1] || 0, fAB);
+            const cB = Math.max(currentAnalysisDocFreq[w2] || 0, fAB);
+            const denom = cA + cB - fAB;
+            const jaccard = denom > 0 ? Math.max(0, Math.min(1.0, fAB / denom)) : 0;
+            if (jaccard > 0.01) {
+                pairs.push({ w1, w2, fAB, jaccard });
+            }
+        });
+        
+        pairs.sort((a, b) => b.jaccard - a.jaccard);
+        pairs.forEach(p => {
+            const escapedW1 = p.w1.includes('"') ? p.w1.replace(/"/g, '""') : p.w1;
+            const escapedW2 = p.w2.includes('"') ? p.w2.replace(/"/g, '""') : p.w2;
+            csv += `"${escapedW1}","${escapedW2}",${p.fAB},${p.jaccard.toFixed(4)}\n`;
+        });
+        
+        downloadCSV("co_occurrence_pairs_metrics.csv", csv);
     });
-    
-    pairs.sort((a, b) => b.jaccard - a.jaccard);
-    pairs.forEach(p => {
-        const escapedW1 = p.w1.includes('"') ? p.w1.replace(/"/g, '""') : p.w1;
-        const escapedW2 = p.w2.includes('"') ? p.w2.replace(/"/g, '""') : p.w2;
-        csv += `"${escapedW1}","${escapedW2}",${p.fAB},${p.jaccard.toFixed(4)}\n`;
-    });
-    
-    downloadCSV("co_occurrence_pairs_metrics.csv", csv);
-});
+}
 
 // Instantly download N-gram collocation list
 if (exportNgramCsvBtn) {
     exportNgramCsvBtn.addEventListener('click', () => {
+        closeCsvDropdown();
         if (!wordFrequencies || wordFrequencies.length === 0) return;
         const list = getFilteredAndSortedNgrams();
         if (!list || list.length === 0) {
@@ -2353,6 +2395,21 @@ if (exportNgramCsvBtn) {
         });
 
         downloadCSV(`collocation_${currentNgramN}gram_metrics.csv`, csv);
+    });
+}
+
+// Download all 3 CSVs sequentially
+if (exportAllCsvBtn) {
+    exportAllCsvBtn.addEventListener('click', () => {
+        if (!wordFrequencies || wordFrequencies.length === 0) return;
+        closeCsvDropdown();
+        if (exportWordsCsvBtn) exportWordsCsvBtn.click();
+        setTimeout(() => {
+            if (exportPairsCsvBtn) exportPairsCsvBtn.click();
+        }, 250);
+        setTimeout(() => {
+            if (exportNgramCsvBtn) exportNgramCsvBtn.click();
+        }, 500);
     });
 }
 
@@ -4612,9 +4669,11 @@ function updateWordCloud() {
     if (wordFrequencies.length === 0) {
         emptyState.style.display = 'flex';
         downloadBtn.disabled = true;
+        if (exportCsvDropdownBtn) exportCsvDropdownBtn.disabled = true;
         exportWordsCsvBtn.disabled = true;
         exportPairsCsvBtn.disabled = true;
         if (exportNgramCsvBtn) exportNgramCsvBtn.disabled = true;
+        if (exportAllCsvBtn) exportAllCsvBtn.disabled = true;
         if (relayoutBtn) relayoutBtn.disabled = true;
         if (sidebarRelayoutBtn) sidebarRelayoutBtn.disabled = true;
         if (networkExcludedBar) networkExcludedBar.style.display = 'none';
@@ -4624,9 +4683,11 @@ function updateWordCloud() {
 
     emptyState.style.display = 'none';
     downloadBtn.disabled = false;
+    if (exportCsvDropdownBtn) exportCsvDropdownBtn.disabled = false;
     exportWordsCsvBtn.disabled = false;
     exportPairsCsvBtn.disabled = false;
     if (exportNgramCsvBtn) exportNgramCsvBtn.disabled = false;
+    if (exportAllCsvBtn) exportAllCsvBtn.disabled = false;
     if (relayoutBtn) relayoutBtn.disabled = false;
     if (sidebarRelayoutBtn) sidebarRelayoutBtn.disabled = false;
 
@@ -4651,9 +4712,11 @@ function updateWordCloud() {
         emptyState.querySelector('h2').innerText = "条件に合う単語がありません";
         emptyState.querySelector('p').innerText = "「最小出現回数」を下げるか、より多くのデータを読み込んでください。";
         downloadBtn.disabled = true;
+        if (exportCsvDropdownBtn) exportCsvDropdownBtn.disabled = true;
         exportWordsCsvBtn.disabled = true;
         exportPairsCsvBtn.disabled = true;
         if (exportNgramCsvBtn) exportNgramCsvBtn.disabled = true;
+        if (exportAllCsvBtn) exportAllCsvBtn.disabled = true;
         if (relayoutBtn) relayoutBtn.disabled = true;
         if (sidebarRelayoutBtn) sidebarRelayoutBtn.disabled = true;
         if (networkExcludedBar) networkExcludedBar.style.display = 'none';

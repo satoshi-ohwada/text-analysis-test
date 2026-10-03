@@ -1172,6 +1172,49 @@ textarea#raw-text-input:focus {
     color: var(--accent-blue);
 }
 
+/* CSV Export Dropdown Menu */
+.csv-dropdown-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+.csv-menu-item {
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    font-size: 12px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+.csv-menu-item:hover {
+    background-color: var(--bg-element, rgba(255, 255, 255, 0.08)) !important;
+}
+
+.csv-menu-item:active {
+    transform: scale(0.99);
+}
+
+.csv-item-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.csv-item-desc {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    padding-left: 20px;
+}
+
 /* スマホ・タブレット用レスポンシブ対応 */
 @media (max-width: 900px) {
     .app-container {
