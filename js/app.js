@@ -80,7 +80,6 @@ const networkThresholdRange = document.getElementById('network-threshold-range')
 const networkThresholdVal = document.getElementById('network-threshold-val');
 const networkOptionsGroup = document.getElementById('network-options-group');
 const networkMinEdgeCheck = document.getElementById('network-min-edge-check');
-const networkShowIsolatedCheck = document.getElementById('network-show-isolated-check');
 const colorTheme = document.getElementById('color-theme');
 const fontSelect = document.getElementById('font-select');
 const shapeCircle = document.getElementById('shape-circle');
@@ -1327,7 +1326,7 @@ if (networkThresholdRange) {
 }
 
 // Render triggers for filters
-[posNoun, posVerb, posAdj, posAdv, mergeNounsCheckbox, document.getElementById('ranking-method'), networkMinEdgeCheck, networkShowIsolatedCheck].forEach(elem => {
+[posNoun, posVerb, posAdj, posAdv, mergeNounsCheckbox, document.getElementById('ranking-method'), networkMinEdgeCheck].forEach(elem => {
     if (!elem) return;
     elem.addEventListener('change', () => {
         if (rawTextData) {
@@ -2457,31 +2456,19 @@ function processAndRender() {
         });
     }
 
-    // [Proposal 2: 孤立ノード表示（線のない語も作図対象に含める）]
-    const showIsolatedNodes = networkShowIsolatedCheck ? networkShowIsolatedCheck.checked : true;
     const networkNodesSet = new Set();
     topEdges.forEach(e => {
         if (networkNodesSet.size < maxWords) networkNodesSet.add(e.sourceId);
         if (networkNodesSet.size < maxWords) networkNodesSet.add(e.targetId);
     });
 
-    if (showIsolatedNodes) {
-        filteredList.forEach(item => {
-            if (networkNodesSet.size < maxWords) {
-                networkNodesSet.add(item.text);
-            }
-        });
-    }
-
     networkExcludedWords = filteredList.filter(item => !networkNodesSet.has(item.text));
 
     const tempNodes = Array.from(networkNodesSet).map(word => {
-        const hasEdge = topEdges.some(e => e.sourceId === word || e.targetId === word);
         return {
             id: word,
             count: counts[word] || 1,
             community: word,
-            isIsolated: !hasEdge,
             x: cloudCanvas.width / 2 + (Math.random() - 0.5) * 200,
             y: cloudCanvas.height / 2 + (Math.random() - 0.5) * 200,
             vx: 0,
@@ -2552,9 +2539,7 @@ function processAndRender() {
     nodesList.forEach(node => {
         const commIndex = sortedCommunities.indexOf(node.community);
         node.communityIndex = commIndex >= 0 ? commIndex : 0;
-        node.communityLabel = node.isIsolated
-            ? '孤立語 (独立話題)'
-            : `グループ ${String.fromCharCode(65 + (node.communityIndex % 26))}`;
+        node.communityLabel = `グループ ${String.fromCharCode(65 + (node.communityIndex % 26))}`;
     });
 
     networkNodes = nodesList;
@@ -3643,19 +3628,11 @@ function drawNetworkOnCanvas(canvas, nodes, edges, selectedTheme, selectedFont, 
         ctx.fillStyle = color;
         ctx.fill();
         
-        if (node.isIsolated) {
-            ctx.setLineDash([3 * scaleFactor, 2 * scaleFactor]);
-            ctx.strokeStyle = '#F59E0B'; // Distinctive warm dashed border for isolated node
-            ctx.lineWidth = 2 * scaleFactor;
-        } else {
-            ctx.setLineDash([]);
-            ctx.strokeStyle = selectedTheme === 'pure-bw' 
-                ? '#000000' 
-                : (isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.3)');
-            ctx.lineWidth = (selectedTheme === 'pure-bw' ? 2 : 1.5) * scaleFactor;
-        }
+        ctx.strokeStyle = selectedTheme === 'pure-bw' 
+            ? '#000000' 
+            : (isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.3)');
+        ctx.lineWidth = (selectedTheme === 'pure-bw' ? 2 : 1.5) * scaleFactor;
         ctx.stroke();
-        ctx.setLineDash([]);
         
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
