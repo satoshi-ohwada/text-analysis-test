@@ -31,6 +31,15 @@ let pcaExplainedVar2 = '--'; // Variance explained by PC2 (%)
 // LDA Topic Model State
 let currentLdaResult = null;
 
+// Collocation (N-gram) State
+let currentNgramN = 2; // 2, 3, or 4
+let currentNgramTarget = 'keywords'; // 'keywords' or 'all'
+let currentNgramSort = 'count'; // 'count', 'doc', 'jaccard'
+let currentNgramSearch = '';
+let currentNgramList = [];
+let currentAnalysisTokenWordsList = [];
+let currentAnalysisLineWordsList = [];
+
 // Initialize UI Elements
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
@@ -42,6 +51,7 @@ const progressBar = document.getElementById('progress-bar');
 const cloudCanvas = document.getElementById('cloud-canvas');
 const chartContainer = document.getElementById('chart-container');
 const ldaContainer = document.getElementById('lda-container');
+const collocationContainer = document.getElementById('collocation-container');
 const emptyState = document.getElementById('empty-state');
 const tooltip = document.getElementById('tooltip');
 const downloadBtn = document.getElementById('download-btn');
@@ -90,6 +100,7 @@ const resetStopwordsBtn = document.getElementById('reset-stopwords-btn');
 // Export & Relayout Action Buttons
 const exportWordsCsvBtn = document.getElementById('export-words-csv-btn');
 const exportPairsCsvBtn = document.getElementById('export-pairs-csv-btn');
+const exportNgramCsvBtn = document.getElementById('export-ngram-csv-btn');
 const relayoutBtn = document.getElementById('relayout-btn');
 const sidebarRelayoutBtn = document.getElementById('sidebar-relayout-btn');
 let isForceRelayout = false;
@@ -947,6 +958,20 @@ function updateClusterCountGroupVisibility() {
                 </ul>
                 <div class="tips-note">💡 各トピックの代表語を見ることで、テキスト全体にどのようなテーマが潜んでいるかが分かります。</div>
             </div>`;
+        } else if (type === 'collocation') {
+            descHtml = `
+            <div class="method-title"><span class="method-icon">🔗</span>コロケーション (N-gram連語分析)</div>
+            <div class="method-purpose">テキスト内で連続して使われる単語の組み合わせ（連語・定型フレーズ）を抽出し、具体的な表現や言及パターンを分析します。</div>
+            <div class="reading-tips">
+                <div class="tips-title">📌 読み方のポイント</div>
+                <ul class="tips-list">
+                    <li><strong>2-gram / 3-gram / 4-gram</strong> = 連続する語数（2連語・3連語・4連語）を切り替えられます</li>
+                    <li><strong>出現回数バー</strong> = その連語が使われた頻度（長いほど定型表現として多用されている）</li>
+                    <li><strong>Jaccard係数</strong> = 2語の結びつきの強さ（単なる頻出語同士の偶然の隣接でなく、セットで使われやすい関係）</li>
+                    <li><strong>「用例(KWIC)」ボタン</strong> = 実際の文中でその連語がどのように使われているか文脈を確認できます</li>
+                </ul>
+                <div class="tips-note">💡 単語単体の分析（ワードクラウド）では見えない、「具体的な言い回し」や「課題の詳細」を発見するのに最適です。</div>
+            </div>`;
         }
 
         methodDescription.innerHTML = descHtml;
@@ -1524,6 +1549,37 @@ exportPairsCsvBtn.addEventListener('click', () => {
     downloadCSV("co_occurrence_pairs_metrics.csv", csv);
 });
 
+// Instantly download N-gram collocation list
+if (exportNgramCsvBtn) {
+    exportNgramCsvBtn.addEventListener('click', () => {
+        if (!wordFrequencies || wordFrequencies.length === 0) return;
+        const list = getFilteredAndSortedNgrams();
+        if (!list || list.length === 0) {
+            alert("エクスポート可能なコロケーションデータがありません。");
+            return;
+        }
+
+        let wordsHeader = '';
+        for (let i = 1; i <= currentNgramN; i++) {
+            wordsHeader += `構成単語${i},`;
+        }
+
+        let csv = `順位,コロケーション,${wordsHeader}出現回数,文書数 (DF),Jaccard係数\n`;
+        list.forEach((item, idx) => {
+            const rank = idx + 1;
+            const escapedPhrase = item.phrase.replace(/"/g, '""');
+            let wordsCols = '';
+            for (let i = 0; i < currentNgramN; i++) {
+                const w = item.words[i] || '';
+                wordsCols += `"${w.replace(/"/g, '""')}",`;
+            }
+            csv += `${rank},"${escapedPhrase}",${wordsCols}${item.count},${item.docCount},${item.jaccard > 0 ? item.jaccard.toFixed(4) : '-'}\n`;
+        });
+
+        downloadCSV(`collocation_${currentNgramN}gram_metrics.csv`, csv);
+    });
+}
+
 // Merge tokens that match custom compound words and apply synonym replacements
 function mergeCompoundsAndSynonyms(tokens, compoundWordsSet, synonymRulesMap) {
     if (!tokens || tokens.length === 0) return tokens || [];
@@ -1646,6 +1702,7 @@ function processAndRender() {
     const coocCounts = {};
     const uniqueWordsPerLine = [];
     const lineWordsList = [];
+    const tokenWordsList = [];
 
     globalAnalyzedLines.forEach(originalTokens => {
         let tokens = mergeCompoundsAndSynonyms(originalTokens, customCompoundWords, customSynonymRules);
@@ -1688,6 +1745,15 @@ function processAndRender() {
         uniqueWordsPerLine.push(uniqueWordsInLine);
         lineWordsList.push(lineWords);
 
+        const lineTokens = tokens
+            .map(t => {
+                const p = t.pos;
+                let w = (p === '動詞' || p === '形容詞' || p === '副詞') && t.basic_form !== '*' ? t.basic_form : t.surface_form;
+                return w.trim();
+            })
+            .filter(w => w && !/^[!-/:-@[-`{-~、。，．・\s\r\n\t]+$/.test(w));
+        tokenWordsList.push(lineTokens);
+
         const wordsArr = Array.from(uniqueWordsInLine);
         for (let i = 0; i < wordsArr.length; i++) {
             docFreq[wordsArr[i]] = (docFreq[wordsArr[i]] || 0) + 1;
@@ -1704,6 +1770,8 @@ function processAndRender() {
     currentAnalysisCounts = counts;
     currentAnalysisCoocCounts = coocCounts;
     currentAnalysisDocFreq = docFreq; // Needed for correct Jaccard in CSV export
+    currentAnalysisLineWordsList = lineWordsList;
+    currentAnalysisTokenWordsList = tokenWordsList;
 
     const rankingMethod = document.getElementById('ranking-method').value;
 
@@ -2406,6 +2474,251 @@ function openWordTopicDetail(word) {
     openKWICModal(word, count, extraHeaderHtml);
 }
 
+// ==========================================
+// Collocation (N-gram) Analysis Engine
+// ==========================================
+
+function extractNgrams(n = 2, target = 'keywords', minCount = 1) {
+    const sourceLines = target === 'keywords' ? currentAnalysisLineWordsList : currentAnalysisTokenWordsList;
+    if (!sourceLines || sourceLines.length === 0) return [];
+
+    const ngramCounts = {};
+    const ngramDocFreq = {};
+
+    sourceLines.forEach(words => {
+        if (!words || words.length < n) return;
+        const seenInDoc = new Set();
+
+        for (let i = 0; i <= words.length - n; i++) {
+            const gram = words.slice(i, i + n);
+            const key = gram.join(' ');
+
+            ngramCounts[key] = (ngramCounts[key] || 0) + 1;
+            if (!seenInDoc.has(key)) {
+                ngramDocFreq[key] = (ngramDocFreq[key] || 0) + 1;
+                seenInDoc.add(key);
+            }
+        }
+    });
+
+    const list = Object.entries(ngramCounts)
+        .filter(([key, count]) => count >= minCount)
+        .map(([key, count]) => {
+            const words = key.split(' ');
+            const docCount = ngramDocFreq[key] || 1;
+            let jaccard = 0;
+
+            if (n === 2 && currentAnalysisDocFreq) {
+                const [w1, w2] = words;
+                const cA = currentAnalysisDocFreq[w1] || count;
+                const cB = currentAnalysisDocFreq[w2] || count;
+                const denom = cA + cB - docCount;
+                jaccard = denom > 0 ? docCount / denom : 0;
+            }
+
+            return {
+                phrase: key,
+                words,
+                count,
+                docCount,
+                jaccard
+            };
+        });
+
+    return list;
+}
+
+function getFilteredAndSortedNgrams() {
+    const minCount = parseInt(minCountRange?.value || 1);
+    
+    let list = extractNgrams(currentNgramN, currentNgramTarget, minCount);
+
+    if (currentNgramSearch && currentNgramSearch.trim() !== '') {
+        const query = currentNgramSearch.trim().toLowerCase();
+        list = list.filter(item => item.phrase.toLowerCase().includes(query));
+    }
+
+    if (currentNgramSort === 'count') {
+        list.sort((a, b) => b.count - a.count || b.docCount - a.docCount || a.phrase.localeCompare(b.phrase, 'ja'));
+    } else if (currentNgramSort === 'doc') {
+        list.sort((a, b) => b.docCount - a.docCount || b.count - a.count || a.phrase.localeCompare(b.phrase, 'ja'));
+    } else if (currentNgramSort === 'jaccard') {
+        list.sort((a, b) => b.jaccard - a.jaccard || b.count - a.count || a.phrase.localeCompare(b.phrase, 'ja'));
+    }
+
+    currentNgramList = list;
+    return list;
+}
+
+function renderCollocationView() {
+    if (!collocationContainer) return;
+    collocationContainer.style.display = 'block';
+
+    const list = getFilteredAndSortedNgrams();
+    const maxCount = list.length > 0 ? Math.max(...list.map(item => item.count)) : 1;
+    const maxDisplay = 100;
+    const displayList = list.slice(0, maxDisplay);
+
+    let rowsHtml = '';
+    if (displayList.length === 0) {
+        rowsHtml = `
+            <tr>
+                <td colspan="6" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                    条件に一致するコロケーションがありません。「最小出現回数」を下げるか、検索キーワードを変更してください。
+                </td>
+            </tr>
+        `;
+    } else {
+        rowsHtml = displayList.map((item, idx) => {
+            const rank = idx + 1;
+            let rankClass = 'collocation-rank-badge';
+            if (rank === 1) rankClass += ' collocation-rank-1';
+            else if (rank === 2) rankClass += ' collocation-rank-2';
+            else if (rank === 3) rankClass += ' collocation-rank-3';
+
+            const barPct = Math.max(8, Math.min(100, Math.round((item.count / maxCount) * 100)));
+            const wordsBadges = item.words.map(w => `<span class="collocation-word-badge">${w}</span>`).join('<span style="color: var(--text-muted); font-size: 11px;">+</span>');
+            const jaccardStr = item.jaccard > 0 ? item.jaccard.toFixed(3) : '-';
+
+            const safePhrase = item.phrase.replace(/'/g, "\\'");
+
+            return `
+                <tr>
+                    <td style="text-align: center;"><span class="${rankClass}">${rank}</span></td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
+                            ${wordsBadges}
+                        </div>
+                    </td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div class="collocation-bar-bg">
+                                <div class="collocation-bar-fill" style="width: ${barPct}%;"></div>
+                            </div>
+                            <span style="font-weight: 600; min-width: 45px; text-align: right; color: var(--text-primary); font-size: 12.5px;">${item.count}回</span>
+                        </div>
+                    </td>
+                    <td style="text-align: center; color: var(--text-secondary); font-size: 12.5px;">${item.docCount}件</td>
+                    <td style="text-align: center; color: ${item.jaccard > 0 ? 'var(--text-primary)' : 'var(--text-muted)'}; font-size: 12px; font-family: monospace;">${jaccardStr}</td>
+                    <td style="text-align: center;">
+                        <button type="button" class="collocation-kwic-btn" onclick="openKWICModal('${safePhrase}', ${item.count})" title="このフレーズの用例(KWIC)を表示">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <span>用例</span>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    collocationContainer.innerHTML = `
+        <div class="collocation-header">
+            <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
+                <div>
+                    <h2 style="font-size: 17px; font-weight: 700; color: var(--text-primary); margin: 0 0 4px 0; display: flex; align-items: center; gap: 8px;">
+                        <span>🔗</span> コロケーション分析 (${currentNgramN}-gram連語)
+                    </h2>
+                    <div style="font-size: 12px; color: var(--text-secondary);">
+                        連続して出現する単語の組み合わせ（フレーズ）を抽出し、具体的な表現や言及パターンを分析します。
+                    </div>
+                </div>
+                <div style="font-size: 11.5px; padding: 4px 12px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 20px; color: var(--text-secondary);">
+                    表示: <strong style="color: var(--text-primary);">${displayList.length}</strong> / 全${list.length}件
+                </div>
+            </div>
+
+            <!-- Toolbar Controls -->
+            <div class="collocation-toolbar">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">連語長:</span>
+                    <div class="collocation-btn-group">
+                        <button type="button" class="collocation-ngram-btn ${currentNgramN === 2 ? 'active' : ''}" data-n="2">2-gram (2連語)</button>
+                        <button type="button" class="collocation-ngram-btn ${currentNgramN === 3 ? 'active' : ''}" data-n="3">3-gram (3連語)</button>
+                        <button type="button" class="collocation-ngram-btn ${currentNgramN === 4 ? 'active' : ''}" data-n="4">4-gram (4連語)</button>
+                    </div>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">抽出対象:</span>
+                    <select id="collocation-target-select" class="select-control" style="width: auto; height: 32px; padding: 0 8px; font-size: 12px; margin: 0; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
+                        <option value="keywords" ${currentNgramTarget === 'keywords' ? 'selected' : ''}>主要語のみ (名詞・動詞等)</option>
+                        <option value="all" ${currentNgramTarget === 'all' ? 'selected' : ''}>全単語 (助詞等を含むフレーズ)</option>
+                    </select>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">並び順:</span>
+                    <select id="collocation-sort-select" class="select-control" style="width: auto; height: 32px; padding: 0 8px; font-size: 12px; margin: 0; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
+                        <option value="count" ${currentNgramSort === 'count' ? 'selected' : ''}>出現回数順</option>
+                        <option value="doc" ${currentNgramSort === 'doc' ? 'selected' : ''}>文書数 (DF) 順</option>
+                        <option value="jaccard" ${currentNgramSort === 'jaccard' ? 'selected' : ''}>Jaccard係数順 (共起度)</option>
+                    </select>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 6px; flex-grow: 1; min-width: 170px;">
+                    <input type="text" id="collocation-search-input" value="${currentNgramSearch}" placeholder="🔍 単語で絞り込み..." style="width: 100%; height: 32px; padding: 0 10px; font-size: 12px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); box-sizing: border-box;">
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: 14px; overflow-x: auto;">
+            <table class="collocation-table">
+                <thead>
+                    <tr>
+                        <th style="width: 52px; text-align: center;">順位</th>
+                        <th style="text-align: left;">コロケーション (連語フレーズ)</th>
+                        <th style="width: 200px; text-align: left;">出現回数</th>
+                        <th style="width: 90px; text-align: center;">文書数</th>
+                        <th style="width: 95px; text-align: center;">Jaccard</th>
+                        <th style="width: 80px; text-align: center;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rowsHtml}
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    // Bind events inside collocation container
+    const nBtns = collocationContainer.querySelectorAll('.collocation-ngram-btn');
+    nBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            currentNgramN = parseInt(e.currentTarget.getAttribute('data-n'));
+            renderCollocationView();
+        });
+    });
+
+    const targetSelect = document.getElementById('collocation-target-select');
+    if (targetSelect) {
+        targetSelect.addEventListener('change', (e) => {
+            currentNgramTarget = e.target.value;
+            renderCollocationView();
+        });
+    }
+
+    const sortSelect = document.getElementById('collocation-sort-select');
+    if (sortSelect) {
+        sortSelect.addEventListener('change', (e) => {
+            currentNgramSort = e.target.value;
+            renderCollocationView();
+        });
+    }
+
+    const searchInput = document.getElementById('collocation-search-input');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            currentNgramSearch = e.target.value;
+            renderCollocationView();
+            const updatedInput = document.getElementById('collocation-search-input');
+            if (updatedInput) {
+                updatedInput.focus();
+                updatedInput.selectionStart = updatedInput.selectionEnd = updatedInput.value.length;
+            }
+        });
+    }
+}
+
 // Get color schemes (supports topic-lda)
 function getColorScheme(theme, isDarkTheme = false) {
     if (theme === 'topic-lda' && currentLdaResult) {
@@ -2991,9 +3304,11 @@ function updateWordCloud() {
         downloadBtn.disabled = true;
         exportWordsCsvBtn.disabled = true;
         exportPairsCsvBtn.disabled = true;
+        if (exportNgramCsvBtn) exportNgramCsvBtn.disabled = true;
         if (relayoutBtn) relayoutBtn.disabled = true;
         if (sidebarRelayoutBtn) sidebarRelayoutBtn.disabled = true;
         if (networkExcludedBar) networkExcludedBar.style.display = 'none';
+        if (collocationContainer) collocationContainer.style.display = 'none';
         return;
     }
 
@@ -3001,6 +3316,7 @@ function updateWordCloud() {
     downloadBtn.disabled = false;
     exportWordsCsvBtn.disabled = false;
     exportPairsCsvBtn.disabled = false;
+    if (exportNgramCsvBtn) exportNgramCsvBtn.disabled = false;
     if (relayoutBtn) relayoutBtn.disabled = false;
     if (sidebarRelayoutBtn) sidebarRelayoutBtn.disabled = false;
 
@@ -3027,9 +3343,11 @@ function updateWordCloud() {
         downloadBtn.disabled = true;
         exportWordsCsvBtn.disabled = true;
         exportPairsCsvBtn.disabled = true;
+        if (exportNgramCsvBtn) exportNgramCsvBtn.disabled = true;
         if (relayoutBtn) relayoutBtn.disabled = true;
         if (sidebarRelayoutBtn) sidebarRelayoutBtn.disabled = true;
         if (networkExcludedBar) networkExcludedBar.style.display = 'none';
+        if (collocationContainer) collocationContainer.style.display = 'none';
         return;
     }
 
@@ -3037,6 +3355,7 @@ function updateWordCloud() {
         cloudCanvas.style.display = 'block';
         chartContainer.style.display = 'none';
         if (ldaContainer) ldaContainer.style.display = 'none';
+        if (collocationContainer) collocationContainer.style.display = 'none';
         
         const getValue = item => rankingMethod === 'tfidf' ? item.tfidf : item.count;
         const maxVal = getValue(filteredList[0]);
@@ -3168,6 +3487,7 @@ function updateWordCloud() {
         cloudCanvas.style.display = 'block';
         chartContainer.style.display = 'none';
         if (ldaContainer) ldaContainer.style.display = 'none';
+        if (collocationContainer) collocationContainer.style.display = 'none';
         
         const chartList = filteredList.slice(0, 20);
         const selectedFont = fontSelect.value;
@@ -3177,6 +3497,7 @@ function updateWordCloud() {
         cloudCanvas.style.display = 'block';
         chartContainer.style.display = 'none';
         if (ldaContainer) ldaContainer.style.display = 'none';
+        if (collocationContainer) collocationContainer.style.display = 'none';
 
         const selectedFont = fontSelect.value;
         
@@ -3303,6 +3624,7 @@ function updateWordCloud() {
         cloudCanvas.style.display = 'block';
         chartContainer.style.display = 'none';
         if (ldaContainer) ldaContainer.style.display = 'none';
+        if (collocationContainer) collocationContainer.style.display = 'none';
         
         const selectedFont = fontSelect.value;
         drawPCAOnCanvas(cloudCanvas, pcaPoints, selectedTheme, selectedFont, isDarkTheme);
@@ -3310,7 +3632,16 @@ function updateWordCloud() {
         cloudCanvas.style.display = 'none';
         chartContainer.style.display = 'none';
         if (ldaContainer) ldaContainer.style.display = 'block';
+        if (collocationContainer) collocationContainer.style.display = 'none';
         renderLDATopicView();
+    } else if (currentDisplayType === 'collocation') {
+        cloudCanvas.style.display = 'none';
+        chartContainer.style.display = 'none';
+        if (ldaContainer) ldaContainer.style.display = 'none';
+        if (collocationContainer) {
+            collocationContainer.style.display = 'block';
+            renderCollocationView();
+        }
     }
 
     // Update Network Excluded Words Bar
@@ -3481,6 +3812,32 @@ function renderAnalysisSummary(mode, filteredList) {
         nextHtml = `
             <b>👉 各トピックの語をクリック</b>するとKWIC（文中の使われ方）を確認できます。
             共起ネットワークで見たグループと照らし合わせると、テーマの解釈が深まります。`;
+    } else if (mode === 'collocation') {
+        // ① コロケーション用コメント
+        const n = currentNgramN;
+        const targetDesc = currentNgramTarget === 'keywords' ? '重要語のみ' : '助詞・全語を含む';
+        const topNgrams = (currentNgramList || []).slice(0, 5);
+        
+        let topPhrasesHtml = '';
+        if (topNgrams.length > 0) {
+            topPhrasesHtml = topNgrams.map(item => {
+                const safePhrase = item.phrase.replace(/'/g, "\\'");
+                return `<span style="text-decoration:underline;cursor:pointer;color:var(--accent-blue);font-weight:600;" onclick="openKWICModal('${safePhrase}', ${item.count})">「${item.phrase}」</span>（${item.count}回/出現${item.docCount}件）`;
+            }).join('、');
+        }
+
+        commentHtml = `
+            <b>📊 この結果から読み取れること：</b><br>
+            <b>${n}-gram（${n}連語）</b>によるフレーズパターンが <b>${(currentNgramList || []).length}件</b> 抽出されました（抽出対象: ${targetDesc}）。<br>
+            ${topPhrasesHtml ? `代表的な頻出連語： ${topPhrasesHtml}<br>` : ''}
+            単語単体（1語）では分かりにくい「具体的にどのような表現や組み合わせで語られているか」という<b>言及パターンや文脈</b>を把握できます。<br>
+            <span style="color:var(--text-muted);">💡 上位の連語をクリックするとKWIC（実際の用例）を確認できます。Jaccard係数が高い組み合わせは、単独ではなく常にセットで使われる強い結びつきを示します。</span>`;
+
+        nextHtml = `
+            <b>👉 次のステップ：</b>
+            特定の連語に注目したい場合は、右上の<b>「連語内検索」</b>や<b>「助詞・全語を含む」</b>への切り替え、または
+            <span style="color:var(--accent-blue);cursor:pointer;text-decoration:underline;" onclick="document.getElementById('display-type').value='network';document.getElementById('display-type').dispatchEvent(new Event('change'));">共起ネットワーク</span>
+            で全体的な語と語の繋がりを俯瞰してみましょう。`;
     }
 
     // パネルを組み立てて表示（折りたたみバー）
@@ -3552,6 +3909,7 @@ downloadBtn.addEventListener('click', async () => {
         else if (currentMode === 'network') defaultFilename = 'network_diagram.png';
         else if (currentMode === 'pca') defaultFilename = 'pca_scatter.png';
         else if (currentMode === 'topic-lda') defaultFilename = 'topic_lda.png';
+        else if (currentMode === 'collocation') defaultFilename = 'collocation_ngram.png';
 
         let fileHandle = null;
         if (window.showSaveFilePicker) {
@@ -3744,43 +4102,45 @@ downloadBtn.addEventListener('click', async () => {
 
             const image = exportCanvas.toDataURL("image/png");
             saveImageFile(image, 'pca_scatter.png');
-        } else if (currentMode === 'topic-lda') {
-            if (!ldaContainer) return;
+        } else if (currentMode === 'topic-lda' || currentMode === 'collocation') {
+            const targetContainer = currentMode === 'collocation' ? collocationContainer : ldaContainer;
+            if (!targetContainer) return;
+            const targetFilename = currentMode === 'collocation' ? 'collocation_ngram.png' : 'topic_lda.png';
             
             const originalText = downloadBtn.innerHTML;
             downloadBtn.disabled = true;
             downloadBtn.innerText = "書き出し中...";
 
-            const exportLDA = () => {
+            const exportHTMLContent = () => {
                 // Temporarily expand container to capture full scrolling content
-                const originalHeight = ldaContainer.style.height;
-                const originalOverflow = ldaContainer.style.overflowY;
-                const originalPosition = ldaContainer.style.position;
+                const originalHeight = targetContainer.style.height;
+                const originalOverflow = targetContainer.style.overflowY;
+                const originalPosition = targetContainer.style.position;
                 
-                ldaContainer.style.height = 'auto';
-                ldaContainer.style.overflowY = 'visible';
-                ldaContainer.style.position = 'relative';
+                targetContainer.style.height = 'auto';
+                targetContainer.style.overflowY = 'visible';
+                targetContainer.style.position = 'relative';
 
-                html2canvas(ldaContainer, {
+                html2canvas(targetContainer, {
                     backgroundColor: isDarkTheme ? '#0B0F19' : '#FFFFFF',
                     scale: 2,
-                    windowHeight: ldaContainer.scrollHeight
+                    windowHeight: targetContainer.scrollHeight
                 }).then(canvas => {
                     // Restore original styles
-                    ldaContainer.style.height = originalHeight;
-                    ldaContainer.style.overflowY = originalOverflow;
-                    ldaContainer.style.position = originalPosition;
+                    targetContainer.style.height = originalHeight;
+                    targetContainer.style.overflowY = originalOverflow;
+                    targetContainer.style.position = originalPosition;
 
                     const image = canvas.toDataURL("image/png");
-                    saveImageFile(image, 'topic_lda.png');
+                    saveImageFile(image, targetFilename);
                     
                     downloadBtn.disabled = false;
                     downloadBtn.innerHTML = originalText;
                 }).catch(error => {
                     // Restore original styles on error
-                    ldaContainer.style.height = originalHeight;
-                    ldaContainer.style.overflowY = originalOverflow;
-                    ldaContainer.style.position = originalPosition;
+                    targetContainer.style.height = originalHeight;
+                    targetContainer.style.overflowY = originalOverflow;
+                    targetContainer.style.position = originalPosition;
 
                     console.error("html2canvas error:", error);
                     downloadBtn.disabled = false;
@@ -3792,15 +4152,15 @@ downloadBtn.addEventListener('click', async () => {
             if (typeof html2canvas === 'undefined') {
                 const script = document.createElement('script');
                 script.src = "lib/html2canvas/html2canvas.min.js";
-                script.onload = exportLDA;
+                script.onload = exportHTMLContent;
                 script.onerror = () => {
                     downloadBtn.disabled = false;
                     downloadBtn.innerHTML = originalText;
-                    alert("画像化ライブラリが見つかりません。\\nlib/html2canvas/html2canvas.min.js が存在するか確認してください。");
+                    alert("画像化ライブラリが見つかりません。\nlib/html2canvas/html2canvas.min.js が存在するか確認してください。");
                 };
                 document.head.appendChild(script);
             } else {
-                exportLDA();
+                exportHTMLContent();
             }
         }
     } catch (error) {
@@ -3864,6 +4224,18 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
     let matchCount = 0;
     const maxDisplay = 1000;
     
+    const queryWords = word.trim().split(/\s+/).filter(w => w.length > 0);
+    const isMultiWord = queryWords.length > 1;
+
+    const tokenMatches = (token, target) => {
+        if (!token || !target) return false;
+        const pos = token.pos;
+        const norm = (pos === '動詞' || pos === '形容詞' || pos === '副詞') && token.basic_form !== '*' 
+            ? token.basic_form 
+            : token.surface_form;
+        return norm === target || token.surface_form === target || (token.basic_form && token.basic_form !== '*' && token.basic_form === target);
+    };
+
     // Variables for KWIC Mini Network
     const kwicCoocCounts = {};
     const matchingSentences = [];
@@ -3883,28 +4255,83 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
             tokens = mergeConsecutiveNouns(tokens);
         }
         
-        let wordIndices = [];
-        for (let j = 0; j < tokens.length; j++) {
-            const token = tokens[j];
-            const pos = token.pos;
-            let wordStr = (pos === '動詞' || pos === '形容詞' || pos === '副詞') && token.basic_form !== '*' 
-                ? token.basic_form 
-                : token.surface_form;
-            
-            if (wordStr.trim() === word) {
-                wordIndices.push(j);
+        let matchedSpans = [];
+
+        if (!isMultiWord) {
+            for (let j = 0; j < tokens.length; j++) {
+                if (tokenMatches(tokens[j], word)) {
+                    matchedSpans.push({
+                        start: j,
+                        end: j,
+                        matchedText: tokens[j].surface_form || word
+                    });
+                }
+            }
+        } else {
+            // 1. Contiguous match
+            for (let j = 0; j <= tokens.length - queryWords.length; j++) {
+                let matches = true;
+                for (let k = 0; k < queryWords.length; k++) {
+                    if (!tokenMatches(tokens[j + k], queryWords[k])) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if (matches) {
+                    const start = j;
+                    const end = j + queryWords.length - 1;
+                    const matchedText = tokens.slice(start, end + 1).map(t => t.surface_form).join('');
+                    matchedSpans.push({ start, end, matchedText });
+                }
+            }
+
+            // 2. Interleaved match (for keyword-only extractions separated by particles)
+            if (matchedSpans.length === 0) {
+                for (let j = 0; j < tokens.length; j++) {
+                    if (!tokenMatches(tokens[j], queryWords[0])) continue;
+
+                    let currentTokenIdx = j;
+                    let matchedAll = true;
+                    let lastMatchedIdx = j;
+
+                    for (let k = 1; k < queryWords.length; k++) {
+                        let foundNext = false;
+                        const maxLookahead = Math.min(tokens.length - 1, currentTokenIdx + 4);
+                        for (let nextIdx = currentTokenIdx + 1; nextIdx <= maxLookahead; nextIdx++) {
+                            if (tokenMatches(tokens[nextIdx], queryWords[k])) {
+                                foundNext = true;
+                                currentTokenIdx = nextIdx;
+                                lastMatchedIdx = nextIdx;
+                                break;
+                            }
+                        }
+                        if (!foundNext) {
+                            matchedAll = false;
+                            break;
+                        }
+                    }
+
+                    if (matchedAll) {
+                        const start = j;
+                        const end = lastMatchedIdx;
+                        const matchedText = tokens.slice(start, end + 1).map(t => t.surface_form).join('');
+                        matchedSpans.push({ start, end, matchedText });
+                        j = end;
+                    }
+                }
             }
         }
         
-        if (wordIndices.length > 0) {
+        if (matchedSpans.length > 0) {
             matchingSentences.push(tokens);
             // Count local co-occurrences for ego network
             const uniqueWordsInSentence = new Set();
             tokens.forEach(t => {
                 const p = t.pos;
                 let tStr = (p === '動詞' || p === '形容詞' || p === '副詞') && t.basic_form !== '*' ? t.basic_form : t.surface_form;
-                // Exclude the target word itself, stopwords, and punctuation
-                if (allowedPOS.includes(p) && tStr !== word && !customStopWords.has(tStr) && !defaultStopWordsSet.has(tStr) && !/[!-/:-@[-`{-~、。，．・]/.test(tStr)) {
+                // Exclude the target word(s) itself, stopwords, and punctuation
+                const isTargetPart = isMultiWord ? queryWords.includes(tStr) : (tStr === word);
+                if (allowedPOS.includes(p) && !isTargetPart && !customStopWords.has(tStr) && !defaultStopWordsSet.has(tStr) && !/[!-/:-@[-`{-~、。，．・]/.test(tStr)) {
                     uniqueWordsInSentence.add(tStr);
                 }
             });
@@ -3913,7 +4340,7 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
             });
         }
         
-        for (const wordIndex of wordIndices) {
+        for (const span of matchedSpans) {
             matchCount++;
             if (matchCount > maxDisplay) {
                 kwicLimitWarning.style.display = 'inline-block';
@@ -3921,12 +4348,12 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
             }
             
             let leftContext = "";
-            for (let j = 0; j < wordIndex; j++) {
+            for (let j = 0; j < span.start; j++) {
                 leftContext += tokens[j].surface_form;
             }
             
             let rightContext = "";
-            for (let j = wordIndex + 1; j < tokens.length; j++) {
+            for (let j = span.end + 1; j < tokens.length; j++) {
                 rightContext += tokens[j].surface_form;
             }
             
@@ -3955,7 +4382,7 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
             tdWord.style.whiteSpace = 'nowrap';
             const spanWord = document.createElement('span');
             spanWord.className = 'kwic-keyword';
-            spanWord.textContent = word;
+            spanWord.textContent = span.matchedText || word;
             tdWord.appendChild(spanWord);
             
             const tdRight = document.createElement('td');
