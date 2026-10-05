@@ -147,16 +147,24 @@ flowchart LR
 
 ### ディレクトリ構成
 ```text
-wordcloud-app/
-├── index.html        # メインのアプリケーション画面
-├── kidou.bat         # ローカルサーバー起動用バッチ (Windows向け)
-├── css/              # スタイルシート
-├── js/               # メインロジック (app.js)
-├── lib/              # 外部ライブラリ群 (kuromoji, wordcloud2, html2canvas)
-├── data/             # デモデータなど
-├── server/           # 拡張用バックエンドサーバーコード
-├── scripts/          # 開発用スクリプト群
-└── README.md         # 本ドキュメント
+text-analysis-test/
+├── index.html            # メインアプリケーション画面
+├── kidou.bat             # ローカル起動用バッチ (Windows Edge向け)
+├── css/                  # スタイルシート (styles.css)
+├── js/                   # メインロジック (app.js)
+├── assets/               # 静的アセット
+│   ├── fonts/            # フォントファイル (BIZ UDPゴシック/明朝)
+│   └── icons/            # アイコン・favicon画像
+├── docs/                 # ドキュメント・チュートリアル
+│   ├── images/           # マニュアル用スクリーンショット画像
+│   ├── tutorial.md       # 詳細チュートリアル
+│   ├── technical_architecture.md # 技術構成仕様書
+│   └── deployment_guide.md       # デプロイ・運用ガイド
+├── data/                 # サンプルテキスト・ストップワード辞書データ
+├── lib/                  # 外部ライブラリ群 (kuromoji, wordcloud2, html2canvas)
+├── server/               # ローカルWebサーバー起動スクリプト (bat, ps1, sh)
+├── work/                 # 作業用一時フォルダ (Git追跡対象外)
+└── README.md             # 本ドキュメント
 ```
 
 ### 使用ライブラリ（フロントエンド）
