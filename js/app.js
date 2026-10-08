@@ -1373,8 +1373,8 @@ function showCSVColumnModal(fileName, rows, isReopen = false) {
         updateCSVModalPreview();
     };
 
-    populateColumnOptions();
     csvModalOverlay.style.display = 'flex';
+    populateColumnOptions();
 }
 
 function renderCSVDataTable() {
@@ -1437,10 +1437,12 @@ function renderCSVDataTable() {
     // テーブルボディの生成（最大100行表示）
     let displayedRows = 0;
     const maxDisplayRows = 100;
+    let totalMatchedRows = 0;
 
     for (let r = startRow; r < pendingCsvRows.length; r++) {
         const row = pendingCsvRows[r];
         const isMatched = rowMatchesCSVFilters(row, csvFilterRules, isFilterEnabled);
+        if (isMatched) totalMatchedRows++;
 
         if (onlyMatched && !isMatched) {
             continue;
@@ -1448,7 +1450,7 @@ function renderCSVDataTable() {
 
         displayedRows++;
         if (displayedRows > maxDisplayRows) {
-            break;
+            continue;
         }
 
         const tr = document.createElement('tr');
@@ -1476,6 +1478,20 @@ function renderCSVDataTable() {
             tr.appendChild(td);
         }
         tableBody.appendChild(tr);
+    }
+
+    if (displayedRows > maxDisplayRows) {
+        const trMore = document.createElement('tr');
+        const tdMore = document.createElement('td');
+        tdMore.colSpan = colCount + 1;
+        tdMore.style.textAlign = 'center';
+        tdMore.style.padding = '8px';
+        tdMore.style.color = 'var(--text-muted)';
+        tdMore.style.fontSize = '11px';
+        tdMore.style.background = 'rgba(0,0,0,0.1)';
+        tdMore.textContent = `※ 表示パフォーマンスのため先頭 ${maxDisplayRows} 行を表示中（全 ${displayedRows.toLocaleString()} 行）`;
+        trMore.appendChild(tdMore);
+        tableBody.appendChild(trMore);
     }
 
     if (displayedRows === 0) {

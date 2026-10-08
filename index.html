@@ -497,8 +497,9 @@
 
     <!-- CSV Data Viewer & Filter Modal -->
     <div id="csv-modal-overlay" class="kwic-overlay" style="display: none; z-index: 1100;">
-        <div class="kwic-modal" style="max-width: 1000px; width: 95%; height: 88vh; max-height: 90vh; padding: 20px 24px; display: flex; flex-direction: column;">
-            <header class="kwic-header" style="margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+        <div class="kwic-modal" style="max-width: 1050px; width: 95%; height: 86vh; max-height: 90vh; padding: 18px 24px; display: flex; flex-direction: column; overflow: hidden;">
+            <!-- モーダルヘッダー -->
+            <header class="kwic-header" style="padding: 0 0 10px 0; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); flex-shrink: 0;">
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="font-size: 18px;">📊</span>
                     <strong style="font-size: 16px; color: var(--text-primary);">CSVデータ閲覧・分析抽出設定</strong>
@@ -509,85 +510,78 @@
                 </button>
             </header>
             
-            <div style="overflow-y: auto; flex: 1; padding-right: 4px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 12px;">
-                <!-- 上段: 基本設定 & 分析対象列 -->
-                <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: var(--bg-body); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px;">
-                    <div style="flex: 1; min-width: 280px;">
-                        <label for="csv-column-select" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-primary);">
-                            分析対象の列（本文・自由記述テキスト）:
+            <!-- 上部: 設定コントロール（固定・コンパクト） -->
+            <div style="flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px;">
+                <!-- 基本設定行 -->
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; background: var(--bg-body); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 12px;">
+                    <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 320px;">
+                        <label for="csv-column-select" style="font-size: 12px; font-weight: 700; color: var(--text-primary); white-space: nowrap;">
+                            分析対象の列（本文）:
                         </label>
-                        <select id="csv-column-select" style="width: 100%; padding: 6px 10px; font-size: 12.5px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-surface); color: var(--text-primary); outline: none;">
+                        <select id="csv-column-select" style="flex: 1; padding: 5px 10px; font-size: 12.5px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-surface); color: var(--text-primary); outline: none;">
                         </select>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                        <label class="checkbox-container" style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin: 0;">
+                    <div style="display: flex; align-items: center; gap: 14px;">
+                        <label class="checkbox-container" style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin: 0; cursor: pointer;">
                             <input type="checkbox" id="csv-has-header-check" checked> 1行目を項目名（ヘッダー）とする
                         </label>
-                    </div>
-                </div>
-
-                <!-- 中段: 行の絞り込み（行フィルタ）セクション -->
-                <div class="csv-filter-container">
-                    <div class="csv-filter-header" id="csv-filter-toggle-header">
-                        <label class="checkbox-container" style="font-size: 12.5px; font-weight: 600; color: var(--text-primary); cursor: pointer; margin: 0; display: inline-flex; align-items: center; gap: 8px;">
-                            <input type="checkbox" id="csv-enable-filter-check">
-                            <span>特定条件で行を絞り込んで抽出する（行フィルタ）</span>
+                        <label class="checkbox-container" style="font-size: 12px; font-weight: 600; color: var(--accent-blue); margin: 0; cursor: pointer;">
+                            <input type="checkbox" id="csv-enable-filter-check"> 条件で行を絞り込む（フィルタ）
                         </label>
-                        <span id="csv-filter-summary-badge" style="display: none; font-size: 11px; padding: 2px 8px; border-radius: 12px; background: rgba(59, 130, 246, 0.18); color: var(--accent-blue); font-weight: 600;">
-                            フィルタ有効
-                        </span>
-                    </div>
-                    <div id="csv-filter-panel" style="display: none; padding: 12px; background: rgba(0,0,0,0.1);">
-                        <div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 8px; line-height: 1.4;">
-                            💡 例: 「属性列が 1 または 2」かつ「日付列が 2026-01を含む」などの条件を設定できます（複数条件はAND結合、同一条件内はOR結合）。
-                        </div>
-                        <div id="csv-filter-rules-list" style="display: flex; flex-direction: column; gap: 10px;">
-                            <!-- 動的にフィルタルールが生成されます -->
-                        </div>
-                        <div style="margin-top: 10px; display: flex; justify-content: flex-start;">
-                            <button type="button" id="csv-add-filter-btn" class="btn btn-secondary btn-xs" style="font-size: 11.5px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px;">
-                                <span>＋ 絞り込み条件を追加 (AND)</span>
-                            </button>
-                        </div>
                     </div>
                 </div>
 
-                <!-- 下段: データ閲覧テーブル（一覧プレビュー） -->
-                <div style="background: var(--bg-body); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 200px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-                        <div style="display: flex; align-items: center; gap: 12px;">
-                            <span style="font-size: 12px; font-weight: 700; color: var(--text-primary);">📋 データ一覧プレビュー</span>
-                            <label class="checkbox-container" style="font-size: 11.5px; color: var(--text-secondary); margin: 0; cursor: pointer;">
-                                <input type="checkbox" id="csv-table-only-matched-check" checked> 条件に一致する行のみ表示
-                            </label>
-                        </div>
-                        <div id="csv-match-count-badge" style="font-size: 12px; font-weight: 600; color: var(--accent-blue);">
-                            対象件数: <span id="csv-matching-count">0</span> / <span id="csv-total-count">0</span> 行 (<span id="csv-matching-percent">100%</span>)
-                        </div>
+                <!-- 行の絞り込みパネル（チェック時のみ展開） -->
+                <div id="csv-filter-panel" style="display: none; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; background: rgba(0,0,0,0.22); max-height: 180px; overflow-y: auto;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-size: 11.5px; color: var(--text-muted);">💡 例: 「属性列が 1 または 2」かつ「日付列が 2026-01を含む」などの条件を設定できます</span>
+                        <button type="button" id="csv-add-filter-btn" class="btn btn-secondary btn-xs" style="font-size: 11px; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;">
+                            <span>＋ 条件を追加 (AND)</span>
+                        </button>
                     </div>
-                    
-                    <!-- テーブルスクロールエリア -->
-                    <div class="csv-preview-table-container" style="flex: 1; max-height: 260px;">
-                        <table class="csv-preview-table" id="csv-data-table">
-                            <thead id="csv-data-table-head"></thead>
-                            <tbody id="csv-data-table-body"></tbody>
-                        </table>
+                    <div id="csv-filter-rules-list" style="display: flex; flex-direction: column; gap: 8px;">
+                        <!-- 動的にフィルタルールが生成されます -->
                     </div>
                 </div>
             </div>
 
-            <!-- フッター操作ボタン -->
-            <div style="display: flex; justify-content: space-between; align-items: center; pt-2; border-top: 1px solid var(--border-color); padding-top: 10px; flex-wrap: wrap; gap: 8px;">
+            <!-- 中央: データ閲覧テーブル（主役！利用可能領域いっぱいに広がる） -->
+            <div style="flex: 1; min-height: 200px; display: flex; flex-direction: column; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-body); padding: 10px; overflow: hidden; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; flex-shrink: 0;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span style="font-size: 12.5px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 4px;">
+                            <span>📋</span> データ一覧プレビュー
+                        </span>
+                        <label class="checkbox-container" style="font-size: 11.5px; color: var(--text-secondary); margin: 0; cursor: pointer;">
+                            <input type="checkbox" id="csv-table-only-matched-check" checked> 条件一致行のみ表示
+                        </label>
+                    </div>
+                    <div id="csv-match-count-badge" style="font-size: 12px; font-weight: 600; color: var(--accent-blue);">
+                        対象件数: <span id="csv-matching-count">0</span> / <span id="csv-total-count">0</span> 行 (<span id="csv-matching-percent">100%</span>)
+                    </div>
+                </div>
+                
+                <!-- テーブルスクロールエリア -->
+                <div class="csv-preview-table-container" style="flex: 1; height: 100%; min-height: 180px; overflow: auto; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-surface);">
+                    <table class="csv-preview-table" id="csv-data-table" style="width: 100%; min-width: 600px;">
+                        <thead id="csv-data-table-head"></thead>
+                        <tbody id="csv-data-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 下部フッター（固定表示） -->
+            <footer style="flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 10px; flex-wrap: wrap; gap: 8px;">
                 <div style="font-size: 12px; color: var(--text-secondary);">
-                    全 <span id="csv-footer-total">0</span> 行中、<strong id="csv-footer-matched" style="color: var(--accent-blue); font-size: 13.5px;">0</strong> 行を分析対象として抽出します
+                    全 <span id="csv-footer-total">0</span> 行中、<strong id="csv-footer-matched" style="color: var(--accent-blue); font-size: 14px;">0</strong> 行を分析対象として抽出します
                 </div>
                 <div style="display: flex; gap: 10px;">
                     <button id="csv-cancel-btn" style="padding: 7px 16px; font-size: 12.5px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-surface); color: var(--text-primary); cursor: pointer;">キャンセル</button>
-                    <button id="csv-confirm-btn" style="padding: 7px 20px; font-size: 12.5px; border-radius: 6px; border: none; background: var(--accent-blue); color: #ffffff; font-weight: 600; cursor: pointer;">
+                    <button id="csv-confirm-btn" style="padding: 7px 22px; font-size: 12.5px; border-radius: 6px; border: none; background: var(--accent-blue); color: #ffffff; font-weight: 600; cursor: pointer;">
                         <span id="csv-confirm-btn-text">選択した列で分析を実行</span>
                     </button>
                 </div>
-            </div>
+            </footer>
         </div>
     </div>
 
@@ -630,6 +624,6 @@
         </div>
     </div>
 
-    <script src="js/app.js?v=4.3"></script>
+    <script src="js/app.js?v=4.4"></script>
 </body>
 </html>

@@ -1344,7 +1344,8 @@ textarea#raw-text-input:focus {
 
 /* CSV データ閲覧プレビューテーブル用スタイル */
 .csv-preview-table-container {
-    max-height: 250px;
+    height: 100%;
+    min-height: 200px;
     overflow: auto;
     border: 1px solid var(--border-color);
     border-radius: 6px;
