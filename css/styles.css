@@ -1260,3 +1260,85 @@ textarea#raw-text-input:focus {
         border-bottom: 1px solid var(--border-color);
     }
 }
+
+/* CSV 行絞り込み（行フィルタ）モーダル用スタイル */
+.csv-filter-container {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    margin-bottom: 16px;
+    overflow: hidden;
+}
+
+.csv-filter-header {
+    padding: 10px 14px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid transparent;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+
+.csv-filter-header:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.csv-filter-header.is-open {
+    border-bottom-color: var(--border-color);
+}
+
+.csv-filter-rule-card {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.18);
+    position: relative;
+    transition: border-color 0.15s;
+}
+
+.csv-filter-rule-card:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.csv-filter-chip {
+    padding: 3px 9px;
+    font-size: 11px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-element);
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.csv-filter-chip:hover {
+    border-color: var(--accent-blue);
+    color: var(--text-primary);
+}
+
+.csv-filter-chip.active {
+    background: var(--accent-blue);
+    border-color: var(--accent-blue);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: 0 1px 4px rgba(59, 130, 246, 0.35);
+}
+
+.csv-filter-chip .chip-count {
+    font-size: 10px;
+    opacity: 0.75;
+}
+
+.csv-filter-chip.active .chip-count {
+    opacity: 0.9;
+    color: rgba(255, 255, 255, 0.9);
+}
+
