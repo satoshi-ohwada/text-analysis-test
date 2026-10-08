@@ -1342,3 +1342,68 @@ textarea#raw-text-input:focus {
     color: rgba(255, 255, 255, 0.9);
 }
 
+/* CSV データ閲覧プレビューテーブル用スタイル */
+.csv-preview-table-container {
+    max-height: 250px;
+    overflow: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-surface);
+}
+
+.csv-preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11.5px;
+    white-space: nowrap;
+}
+
+.csv-preview-table th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    padding: 7px 10px;
+    border-bottom: 2px solid var(--border-color);
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    text-align: left;
+    font-weight: 600;
+    z-index: 2;
+}
+
+.csv-preview-table th.target-col {
+    background: rgba(59, 130, 246, 0.22);
+    color: var(--text-primary);
+    border-bottom-color: var(--accent-blue);
+}
+
+.csv-preview-table th.filter-col {
+    background: rgba(245, 158, 11, 0.2);
+    color: #FBBF24;
+}
+
+.csv-preview-table td {
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    max-width: 340px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.csv-preview-table td.target-cell {
+    background: rgba(59, 130, 246, 0.07);
+    font-weight: 500;
+}
+
+.csv-preview-table tr.matched-row {
+    background: transparent;
+}
+
+.csv-preview-table tr.unmatched-row {
+    opacity: 0.35;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+
