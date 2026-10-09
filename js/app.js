@@ -1145,8 +1145,11 @@ function parseCSVText(text) {
 }
 
 let pendingCsvFileName = "";
-let csvFilterRules = [];
-let csvNextRuleId = 1;
+// Excel風オートフィルタ: Map<colIndex, Set<string>>
+// キー: 列インデックス (number)
+// 値: 絞り込みで選択された値のSet<string>（Mapに無い列は全選択＝フィルタなし扱い）
+let excelColumnFilters = new Map();
+let currentFilterDropdown = null;
 
 function getCSVColCount(rows) {
     return rows && rows.length > 0 ? Math.max(...rows.map(r => r.length)) : 0;
@@ -1159,43 +1162,13 @@ function getCSVColumnName(colIdx, rows, hasHeader) {
     return `${colIdx + 1}列目`;
 }
 
-function rowMatchesCSVFilters(row, rules, isFilterEnabled) {
-    if (!isFilterEnabled || !rules || rules.length === 0) return true;
-
-    for (const rule of rules) {
-        const cellVal = (row && row[rule.colIdx] !== undefined) ? String(row[rule.colIdx]).trim() : '';
-        const matchType = rule.matchType || 'exact_or';
-
-        const targets = Array.from(rule.selectedValues || []);
-        if (rule.customKeywords) {
-            for (const kw of rule.customKeywords) {
-                if (kw && !targets.includes(kw)) targets.push(kw);
-            }
-        }
-
-        // 条件が一切指定されていないルールはスキップ（全通過）
-        if (targets.length === 0) continue;
-
-        if (matchType === 'exact_or') {
-            const matched = targets.some(target => {
-                if (target === '(空白)') return cellVal === '';
-                return cellVal === target;
-            });
-            if (!matched) return false;
-        } else if (matchType === 'partial_or') {
-            const lowerCell = cellVal.toLowerCase();
-            const matched = targets.some(target => {
-                if (target === '(空白)') return cellVal === '';
-                return lowerCell.includes(target.toLowerCase());
-            });
-            if (!matched) return false;
-        } else if (matchType === 'exclude') {
-            const lowerCell = cellVal.toLowerCase();
-            const excluded = targets.some(target => {
-                if (target === '(空白)') return cellVal === '';
-                return lowerCell.includes(target.toLowerCase());
-            });
-            if (excluded) return false;
+function rowMatchesExcelFilters(row, filtersMap) {
+    if (!filtersMap || filtersMap.size === 0) return true;
+    for (const [colIdx, allowedSet] of filtersMap.entries()) {
+        const raw = (row && row[colIdx] !== undefined && row[colIdx] !== null) ? String(row[colIdx]).trim() : '';
+        const cellVal = raw === '' ? '(空白)' : raw;
+        if (!allowedSet.has(cellVal)) {
+            return false;
         }
     }
     return true;
@@ -1222,6 +1195,303 @@ function getCSVColumnValueCounts(colIdx, rows, hasHeader) {
     });
 }
 
+function closeExcelFilterDropdown() {
+    if (currentFilterDropdown) {
+        if (currentFilterDropdown.parentNode) {
+            currentFilterDropdown.parentNode.removeChild(currentFilterDropdown);
+        }
+        currentFilterDropdown = null;
+    }
+}
+
+function openExcelFilterDropdown(colIdx, buttonElem) {
+    closeExcelFilterDropdown();
+    if (!pendingCsvRows || pendingCsvRows.length === 0) return;
+
+    const hasHeader = document.getElementById('csv-has-header-check')?.checked ?? true;
+    const colName = getCSVColumnName(colIdx, pendingCsvRows, hasHeader);
+    const valueCounts = getCSVColumnValueCounts(colIdx, pendingCsvRows, hasHeader);
+    const allValues = valueCounts.map(vc => vc[0]);
+
+    // 作業用テンポラリSet（未設定なら全選択）
+    const tempSelected = excelColumnFilters.has(colIdx)
+        ? new Set(excelColumnFilters.get(colIdx))
+        : new Set(allValues);
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'excel-filter-dropdown';
+
+    // ヘッダー
+    const header = document.createElement('div');
+    header.className = 'excel-filter-dropdown-header';
+    const title = document.createElement('div');
+    title.className = 'excel-filter-dropdown-title';
+    title.textContent = `フィルタ: ${colName}`;
+    title.title = colName;
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'btn-subtle';
+    closeBtn.style.cssText = 'border:none; background:none; cursor:pointer; color:var(--text-muted); font-size:12px; padding:2px 6px;';
+    closeBtn.textContent = '✕';
+    closeBtn.onclick = (e) => {
+        e.stopPropagation();
+        closeExcelFilterDropdown();
+    };
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    dropdown.appendChild(header);
+
+    // 検索窓
+    const searchBox = document.createElement('div');
+    searchBox.className = 'excel-filter-search-box';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.className = 'excel-filter-search-input';
+    searchInput.placeholder = '候補を検索...';
+    searchInput.autocomplete = 'off';
+    searchBox.appendChild(searchInput);
+    dropdown.appendChild(searchBox);
+
+    // 一括アクションバー
+    const actionsBar = document.createElement('div');
+    actionsBar.className = 'excel-filter-actions-bar';
+    const selectAllBtn = document.createElement('button');
+    selectAllBtn.type = 'button';
+    selectAllBtn.textContent = 'すべて選択';
+    const clearAllBtn = document.createElement('button');
+    clearAllBtn.type = 'button';
+    clearAllBtn.textContent = 'すべてクリア';
+    actionsBar.appendChild(selectAllBtn);
+    actionsBar.appendChild(clearAllBtn);
+    dropdown.appendChild(actionsBar);
+
+    // チェックリストエリア
+    const listContainer = document.createElement('div');
+    listContainer.className = 'excel-filter-list';
+    dropdown.appendChild(listContainer);
+
+    function renderListItems() {
+        listContainer.innerHTML = '';
+        const query = (searchInput.value || '').trim().toLowerCase();
+        let renderedCount = 0;
+
+        valueCounts.forEach(([val, count]) => {
+            if (query && !val.toLowerCase().includes(query)) {
+                return;
+            }
+            renderedCount++;
+
+            const item = document.createElement('label');
+            item.className = 'excel-filter-item';
+
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.checked = tempSelected.has(val);
+            chk.onchange = () => {
+                if (chk.checked) {
+                    tempSelected.add(val);
+                } else {
+                    tempSelected.delete(val);
+                }
+            };
+
+            const labelSpan = document.createElement('span');
+            labelSpan.className = 'item-label';
+            labelSpan.textContent = val;
+            labelSpan.title = val;
+
+            const countSpan = document.createElement('span');
+            countSpan.className = 'item-count';
+            countSpan.textContent = `(${count.toLocaleString()})`;
+
+            item.appendChild(chk);
+            item.appendChild(labelSpan);
+            item.appendChild(countSpan);
+            listContainer.appendChild(item);
+        });
+
+        if (renderedCount === 0) {
+            const emptyNotice = document.createElement('div');
+            emptyNotice.style.cssText = 'padding: 10px; color: var(--text-muted); font-size: 11px; text-align: center;';
+            emptyNotice.textContent = '一致する候補がありません';
+            listContainer.appendChild(emptyNotice);
+        }
+    }
+
+    renderListItems();
+
+    searchInput.oninput = () => {
+        renderListItems();
+    };
+
+    selectAllBtn.onclick = (e) => {
+        e.stopPropagation();
+        const query = (searchInput.value || '').trim().toLowerCase();
+        valueCounts.forEach(([val]) => {
+            if (!query || val.toLowerCase().includes(query)) {
+                tempSelected.add(val);
+            }
+        });
+        renderListItems();
+    };
+
+    clearAllBtn.onclick = (e) => {
+        e.stopPropagation();
+        const query = (searchInput.value || '').trim().toLowerCase();
+        if (query) {
+            valueCounts.forEach(([val]) => {
+                if (val.toLowerCase().includes(query)) {
+                    tempSelected.delete(val);
+                }
+            });
+        } else {
+            tempSelected.clear();
+        }
+        renderListItems();
+    };
+
+    // フッター
+    const footer = document.createElement('div');
+    footer.className = 'excel-filter-footer';
+
+    const clearFilterBtn = document.createElement('button');
+    clearFilterBtn.type = 'button';
+    clearFilterBtn.className = 'excel-filter-btn-clear';
+    clearFilterBtn.textContent = 'フィルタ解除';
+    clearFilterBtn.title = 'この列の絞り込みを解除して全表示にします';
+    clearFilterBtn.onclick = (e) => {
+        e.stopPropagation();
+        excelColumnFilters.delete(colIdx);
+        closeExcelFilterDropdown();
+        updateCSVModalPreview();
+    };
+
+    const footerRight = document.createElement('div');
+    footerRight.className = 'excel-filter-footer-right';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'excel-filter-btn-cancel';
+    cancelBtn.textContent = 'キャンセル';
+    cancelBtn.onclick = (e) => {
+        e.stopPropagation();
+        closeExcelFilterDropdown();
+    };
+
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'excel-filter-btn-ok';
+    okBtn.textContent = 'OK';
+    okBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (tempSelected.size === allValues.length) {
+            // 全て選択されている場合はフィルタ解除扱い（Mapから削除）
+            excelColumnFilters.delete(colIdx);
+        } else {
+            excelColumnFilters.set(colIdx, new Set(tempSelected));
+        }
+        closeExcelFilterDropdown();
+        updateCSVModalPreview();
+    };
+
+    footerRight.appendChild(cancelBtn);
+    footerRight.appendChild(okBtn);
+    footer.appendChild(clearFilterBtn);
+    footer.appendChild(footerRight);
+    dropdown.appendChild(footer);
+
+    // ポジショニング
+    document.body.appendChild(dropdown);
+    currentFilterDropdown = dropdown;
+
+    const btnRect = buttonElem.getBoundingClientRect();
+    const dropdownWidth = 280;
+    const dropdownHeight = 320;
+
+    let top = btnRect.bottom + 4;
+    if (top + dropdownHeight > window.innerHeight - 10) {
+        top = Math.max(10, btnRect.top - dropdownHeight - 4);
+    }
+
+    let left = btnRect.left - 120;
+    if (left + dropdownWidth > window.innerWidth - 10) {
+        left = window.innerWidth - dropdownWidth - 10;
+    }
+    if (left < 10) left = 10;
+
+    dropdown.style.top = `${top}px`;
+    dropdown.style.left = `${left}px`;
+
+    // 検索入力欄に自動フォーカス
+    setTimeout(() => {
+        searchInput.focus();
+    }, 50);
+
+    // 外側クリックで閉じるハンドラー
+    const outsideClickListener = (e) => {
+        if (!dropdown.contains(e.target) && e.target !== buttonElem && !buttonElem.contains(e.target)) {
+            closeExcelFilterDropdown();
+            document.removeEventListener('mousedown', outsideClickListener);
+        }
+    };
+    setTimeout(() => {
+        document.addEventListener('mousedown', outsideClickListener);
+    }, 10);
+}
+
+function renderExcelActiveFiltersBar() {
+    const bar = document.getElementById('csv-active-filters-bar');
+    const list = document.getElementById('csv-active-filters-list');
+    if (!bar || !list) return;
+
+    if (excelColumnFilters.size === 0) {
+        bar.style.display = 'none';
+        list.innerHTML = '';
+        return;
+    }
+
+    bar.style.display = 'flex';
+    list.innerHTML = '';
+
+    const hasHeader = document.getElementById('csv-has-header-check')?.checked ?? true;
+
+    for (const [colIdx, selectedSet] of excelColumnFilters.entries()) {
+        const colName = getCSVColumnName(colIdx, pendingCsvRows, hasHeader);
+        const chip = document.createElement('div');
+        chip.className = 'excel-active-chip';
+
+        const title = document.createElement('span');
+        title.className = 'excel-active-chip-title';
+        title.textContent = `${colName}:`;
+
+        const values = Array.from(selectedSet);
+        const valText = values.length === 0
+            ? '(なし)'
+            : values.slice(0, 2).join(', ') + (values.length > 2 ? ` (+${values.length - 2})` : '');
+
+        const valsSpan = document.createElement('span');
+        valsSpan.className = 'excel-active-chip-values';
+        valsSpan.textContent = valText;
+        valsSpan.title = values.join(', ');
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'excel-active-chip-remove';
+        removeBtn.textContent = '✕';
+        removeBtn.title = `${colName} のフィルタを解除`;
+        removeBtn.onclick = (e) => {
+            e.stopPropagation();
+            excelColumnFilters.delete(colIdx);
+            updateCSVModalPreview();
+        };
+
+        chip.appendChild(title);
+        chip.appendChild(valsSpan);
+        chip.appendChild(removeBtn);
+        list.appendChild(chip);
+    }
+}
+
 function showCSVColumnModal(fileName, rows, isReopen = false) {
     if (rows) pendingCsvRows = rows;
     if (fileName) pendingCsvFileName = fileName;
@@ -1229,9 +1499,6 @@ function showCSVColumnModal(fileName, rows, isReopen = false) {
     const csvModalOverlay = document.getElementById('csv-modal-overlay');
     const csvColumnSelect = document.getElementById('csv-column-select');
     const csvHasHeaderCheck = document.getElementById('csv-has-header-check');
-    const csvEnableFilterCheck = document.getElementById('csv-enable-filter-check');
-    const csvFilterPanel = document.getElementById('csv-filter-panel');
-    const csvFilterHeader = document.getElementById('csv-filter-toggle-header');
     const csvModalFilename = document.getElementById('csv-modal-filename');
     const openCsvViewerBtn = document.getElementById('open-csv-viewer-btn');
 
@@ -1249,17 +1516,8 @@ function showCSVColumnModal(fileName, rows, isReopen = false) {
     }
 
     if (!isReopen) {
-        csvFilterRules = [];
-        csvNextRuleId = 1;
-        if (csvEnableFilterCheck) {
-            csvEnableFilterCheck.checked = false;
-        }
-        if (csvFilterPanel) {
-            csvFilterPanel.style.display = 'none';
-        }
-        if (csvFilterHeader) {
-            csvFilterHeader.classList.remove('is-open');
-        }
+        excelColumnFilters.clear();
+        closeExcelFilterDropdown();
     }
 
     function findBestTextColumn() {
@@ -1299,20 +1557,6 @@ function showCSVColumnModal(fileName, rows, isReopen = false) {
         return bestColIdx;
     }
 
-    function findBestDefaultFilterColumn(excludedColIdx) {
-        const hasHeader = csvHasHeaderCheck ? csvHasHeaderCheck.checked : true;
-        let candidateIdx = -1;
-        for (let colIdx = 0; colIdx < colCount; colIdx++) {
-            if (colIdx === excludedColIdx) continue;
-            const headerName = getCSVColumnName(colIdx, pendingCsvRows, hasHeader);
-            if (/年齢|年代|世代|性別|地区|地域|分野|区分|カテゴリ|種別|業種|状態|判断|属性/i.test(headerName)) {
-                return colIdx;
-            }
-            if (candidateIdx === -1) candidateIdx = colIdx;
-        }
-        return candidateIdx !== -1 ? candidateIdx : 0;
-    }
-
     function populateColumnOptions() {
         const currentSelectedVal = isReopen ? parseInt(csvColumnSelect.value) : -1;
         csvColumnSelect.innerHTML = '';
@@ -1348,19 +1592,6 @@ function showCSVColumnModal(fileName, rows, isReopen = false) {
             csvColumnSelect.appendChild(option);
         }
         csvColumnSelect.value = targetColToSelect;
-
-        if (csvFilterRules.length === 0) {
-            const defaultFilterCol = findBestDefaultFilterColumn(targetColToSelect);
-            csvFilterRules.push({
-                id: csvNextRuleId++,
-                colIdx: defaultFilterCol,
-                matchType: 'exact_or',
-                selectedValues: new Set(),
-                customKeywords: [],
-                searchQuery: ''
-            });
-        }
-        renderCSVFilterRules();
         updateCSVModalPreview();
     }
 
@@ -1377,277 +1608,6 @@ function showCSVColumnModal(fileName, rows, isReopen = false) {
     populateColumnOptions();
 }
 
-function renderCSVFilterRules() {
-    const rulesList = document.getElementById('csv-filter-rules-list');
-    if (!rulesList || !pendingCsvRows) return;
-
-    rulesList.innerHTML = '';
-    const hasHeader = document.getElementById('csv-has-header-check')?.checked ?? true;
-    const colCount = getCSVColCount(pendingCsvRows);
-
-    csvFilterRules.forEach((rule, index) => {
-        const card = document.createElement('div');
-        card.className = 'csv-filter-rule-card';
-
-        // ヘッダー（列選択、条件形式、削除ボタン）
-        const headerRow = document.createElement('div');
-        headerRow.style.display = 'flex';
-        headerRow.style.alignItems = 'center';
-        headerRow.style.justifyContent = 'space-between';
-        headerRow.style.gap = '8px';
-        headerRow.style.marginBottom = '8px';
-        headerRow.style.flexWrap = 'wrap';
-
-        const leftGroup = document.createElement('div');
-        leftGroup.style.display = 'flex';
-        leftGroup.style.alignItems = 'center';
-        leftGroup.style.gap = '6px';
-        leftGroup.style.flex = '1';
-        leftGroup.style.minWidth = '220px';
-
-        const colLabel = document.createElement('span');
-        colLabel.style.fontSize = '12px';
-        colLabel.style.fontWeight = '600';
-        colLabel.style.color = 'var(--text-secondary)';
-        colLabel.style.whiteSpace = 'nowrap';
-        colLabel.textContent = `条件 ${index + 1}:`;
-        leftGroup.appendChild(colLabel);
-
-        const colSelect = document.createElement('select');
-        colSelect.className = 'select-control';
-        colSelect.style.flex = '1';
-        colSelect.style.fontSize = '12px';
-        colSelect.style.padding = '4px 8px';
-        colSelect.style.height = '30px';
-
-        for (let c = 0; c < colCount; c++) {
-            const opt = document.createElement('option');
-            opt.value = c;
-            const colName = getCSVColumnName(c, pendingCsvRows, hasHeader);
-            opt.textContent = `[ ${c + 1}列目 ] ${colName}`;
-            if (c === rule.colIdx) opt.selected = true;
-            colSelect.appendChild(opt);
-        }
-
-        colSelect.onchange = () => {
-            rule.colIdx = parseInt(colSelect.value) || 0;
-            rule.selectedValues.clear();
-            rule.customKeywords = [];
-            rule.searchQuery = '';
-            renderCSVFilterRules();
-            updateCSVModalPreview();
-        };
-        leftGroup.appendChild(colSelect);
-        headerRow.appendChild(leftGroup);
-
-        const rightGroup = document.createElement('div');
-        rightGroup.style.display = 'flex';
-        rightGroup.style.alignItems = 'center';
-        rightGroup.style.gap = '6px';
-
-        const typeSelect = document.createElement('select');
-        typeSelect.className = 'select-control';
-        typeSelect.style.fontSize = '12px';
-        typeSelect.style.padding = '4px 6px';
-        typeSelect.style.height = '30px';
-
-        const optExact = document.createElement('option');
-        optExact.value = 'exact_or';
-        optExact.textContent = 'いずれかに一致 (OR)';
-        if (rule.matchType === 'exact_or') optExact.selected = true;
-        typeSelect.appendChild(optExact);
-
-        const optPartial = document.createElement('option');
-        optPartial.value = 'partial_or';
-        optPartial.textContent = 'いずれかを含む (部分一致)';
-        if (rule.matchType === 'partial_or') optPartial.selected = true;
-        typeSelect.appendChild(optPartial);
-
-        const optExclude = document.createElement('option');
-        optExclude.value = 'exclude';
-        optExclude.textContent = '含まない (除外)';
-        if (rule.matchType === 'exclude') optExclude.selected = true;
-        typeSelect.appendChild(optExclude);
-
-        typeSelect.onchange = () => {
-            rule.matchType = typeSelect.value;
-            updateCSVModalPreview();
-        };
-        rightGroup.appendChild(typeSelect);
-
-        if (csvFilterRules.length > 1) {
-            const delBtn = document.createElement('button');
-            delBtn.type = 'button';
-            delBtn.className = 'btn btn-secondary btn-xs';
-            delBtn.title = 'この条件を削除';
-            delBtn.style.padding = '4px 8px';
-            delBtn.style.color = '#EF4444';
-            delBtn.innerHTML = '✕';
-            delBtn.onclick = () => {
-                csvFilterRules = csvFilterRules.filter(r => r.id !== rule.id);
-                renderCSVFilterRules();
-                updateCSVModalPreview();
-            };
-            rightGroup.appendChild(delBtn);
-        }
-        headerRow.appendChild(rightGroup);
-        card.appendChild(headerRow);
-
-        // キーワード入力・検索 & クイック選択バー
-        const actionRow = document.createElement('div');
-        actionRow.style.display = 'flex';
-        actionRow.style.gap = '6px';
-        actionRow.style.alignItems = 'center';
-        actionRow.style.marginBottom = '6px';
-
-        const kwInput = document.createElement('input');
-        kwInput.type = 'text';
-        kwInput.placeholder = 'カンマ区切りで複数指定（例: 30代, 40代）または候補絞り込み...';
-        kwInput.style.flex = '1';
-        kwInput.style.fontSize = '12px';
-        kwInput.style.padding = '4px 8px';
-        kwInput.style.height = '28px';
-        kwInput.style.borderRadius = '4px';
-        kwInput.style.border = '1px solid var(--border-color)';
-        kwInput.style.background = 'var(--bg-surface)';
-        kwInput.style.color = 'var(--text-primary)';
-        kwInput.style.outline = 'none';
-
-        if (rule.searchQuery) {
-            kwInput.value = rule.searchQuery;
-        }
-
-        const valueCounts = getCSVColumnValueCounts(rule.colIdx, pendingCsvRows, hasHeader);
-
-        const selectAllBtn = document.createElement('button');
-        selectAllBtn.type = 'button';
-        selectAllBtn.className = 'btn btn-secondary btn-xs';
-        selectAllBtn.style.fontSize = '11px';
-        selectAllBtn.style.padding = '2px 8px';
-        selectAllBtn.style.height = '28px';
-        selectAllBtn.textContent = '全選択';
-
-        const clearAllBtn = document.createElement('button');
-        clearAllBtn.type = 'button';
-        clearAllBtn.className = 'btn btn-secondary btn-xs';
-        clearAllBtn.style.fontSize = '11px';
-        clearAllBtn.style.padding = '2px 8px';
-        clearAllBtn.style.height = '28px';
-        clearAllBtn.textContent = '全解除';
-
-        actionRow.appendChild(kwInput);
-        actionRow.appendChild(selectAllBtn);
-        actionRow.appendChild(clearAllBtn);
-        card.appendChild(actionRow);
-
-        // チップコンテナ
-        const chipsContainer = document.createElement('div');
-        chipsContainer.style.maxHeight = '110px';
-        chipsContainer.style.overflowY = 'auto';
-        chipsContainer.style.display = 'flex';
-        chipsContainer.style.flexWrap = 'wrap';
-        chipsContainer.style.gap = '5px';
-        chipsContainer.style.padding = '6px';
-        chipsContainer.style.background = 'var(--bg-surface)';
-        chipsContainer.style.border = '1px solid var(--border-color)';
-        chipsContainer.style.borderRadius = '4px';
-
-        function updateChipsView() {
-            chipsContainer.innerHTML = '';
-            const query = (rule.searchQuery || '').trim().toLowerCase();
-
-            let visibleCount = 0;
-            const maxVisible = 60;
-
-            for (const [val, count] of valueCounts) {
-                if (query && !val.toLowerCase().includes(query)) {
-                    continue;
-                }
-                visibleCount++;
-                if (visibleCount > maxVisible) break;
-
-                const chip = document.createElement('div');
-                const isSelected = rule.selectedValues.has(val);
-                chip.className = `csv-filter-chip${isSelected ? ' active' : ''}`;
-                chip.innerHTML = `<span>${val}</span><span class="chip-count">(${count.toLocaleString()})</span>`;
-
-                chip.onclick = () => {
-                    if (rule.selectedValues.has(val)) {
-                        rule.selectedValues.delete(val);
-                    } else {
-                        rule.selectedValues.add(val);
-                    }
-                    updateChipsView();
-                    updateCSVModalPreview();
-                };
-                chipsContainer.appendChild(chip);
-            }
-
-            if (visibleCount === 0) {
-                const emptyMsg = document.createElement('div');
-                emptyMsg.style.fontSize = '11.5px';
-                emptyMsg.style.color = 'var(--text-muted)';
-                emptyMsg.style.padding = '4px';
-                emptyMsg.textContent = '一致する候補値がありません';
-                chipsContainer.appendChild(emptyMsg);
-            } else if (valueCounts.length > maxVisible && !query) {
-                const moreMsg = document.createElement('div');
-                moreMsg.style.fontSize = '10.5px';
-                moreMsg.style.color = 'var(--text-muted)';
-                moreMsg.style.alignSelf = 'center';
-                moreMsg.style.padding = '0 4px';
-                moreMsg.textContent = `他 ${valueCounts.length - maxVisible} 件（検索バーで絞り込み可）`;
-                chipsContainer.appendChild(moreMsg);
-            }
-        }
-
-        function handleInputKeywords() {
-            const raw = kwInput.value;
-            rule.searchQuery = raw;
-
-            const tokens = raw.split(/[,、\n\r]+/).map(t => t.trim()).filter(t => t.length > 0);
-            rule.customKeywords = tokens;
-
-            for (const token of tokens) {
-                for (const [val] of valueCounts) {
-                    if (val.toLowerCase() === token.toLowerCase()) {
-                        rule.selectedValues.add(val);
-                    }
-                }
-            }
-
-            updateChipsView();
-            updateCSVModalPreview();
-        }
-
-        kwInput.oninput = handleInputKeywords;
-
-        selectAllBtn.onclick = () => {
-            const query = (rule.searchQuery || '').trim().toLowerCase();
-            for (const [val] of valueCounts) {
-                if (!query || val.toLowerCase().includes(query)) {
-                    rule.selectedValues.add(val);
-                }
-            }
-            updateChipsView();
-            updateCSVModalPreview();
-        };
-
-        clearAllBtn.onclick = () => {
-            rule.selectedValues.clear();
-            rule.customKeywords = [];
-            kwInput.value = '';
-            rule.searchQuery = '';
-            updateChipsView();
-            updateCSVModalPreview();
-        };
-
-        updateChipsView();
-        card.appendChild(chipsContainer);
-        rulesList.appendChild(card);
-    });
-}
-
 function renderCSVDataTable() {
     const tableHead = document.getElementById('csv-data-table-head');
     const tableBody = document.getElementById('csv-data-table-body');
@@ -1657,22 +1617,10 @@ function renderCSVDataTable() {
     tableBody.innerHTML = '';
 
     const hasHeader = document.getElementById('csv-has-header-check')?.checked ?? true;
-    const isFilterEnabled = document.getElementById('csv-enable-filter-check')?.checked ?? false;
     const onlyMatched = document.getElementById('csv-table-only-matched-check')?.checked ?? true;
     const selectedCol = parseInt(document.getElementById('csv-column-select')?.value) || 0;
     const colCount = getCSVColCount(pendingCsvRows);
     const startRow = hasHeader ? 1 : 0;
-
-    // どの列がどのフィルタルールに対応しているかマッピング
-    const filterColsMap = new Map();
-    if (isFilterEnabled && csvFilterRules.length > 0) {
-        csvFilterRules.forEach((rule, idx) => {
-            if (!filterColsMap.has(rule.colIdx)) {
-                filterColsMap.set(rule.colIdx, []);
-            }
-            filterColsMap.get(rule.colIdx).push(idx + 1);
-        });
-    }
 
     // テーブルヘッダーの生成
     const trHead = document.createElement('tr');
@@ -1686,21 +1634,47 @@ function renderCSVDataTable() {
         const th = document.createElement('th');
         const colName = getCSVColumnName(c, pendingCsvRows, hasHeader);
         const isTarget = c === selectedCol;
-        const isFilter = filterColsMap.has(c);
+        const isFilter = excelColumnFilters.has(c);
 
         if (isTarget) th.classList.add('target-col');
         if (isFilter) th.classList.add('filter-col');
 
-        let badges = '';
+        const thContent = document.createElement('div');
+        thContent.className = 'th-content';
+
+        const labelGroup = document.createElement('div');
+        labelGroup.style.cssText = 'display:flex; align-items:center; gap:4px; overflow:hidden; text-overflow:ellipsis;';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = colName;
+        nameSpan.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+        labelGroup.appendChild(nameSpan);
+
         if (isTarget) {
-            badges += `<span style="display:inline-block; font-size:9.5px; background:var(--accent-blue); color:#ffffff; padding:1px 5px; border-radius:3px; margin-left:4px; font-weight:700;">分析対象</span>`;
-        }
-        if (isFilter) {
-            const ruleNums = filterColsMap.get(c).join(',');
-            badges += `<span style="display:inline-block; font-size:9.5px; background:#D97706; color:#ffffff; padding:1px 5px; border-radius:3px; margin-left:4px; font-weight:700;">条件${ruleNums}</span>`;
+            const targetBadge = document.createElement('span');
+            targetBadge.style.cssText = 'display:inline-block; font-size:9.5px; background:var(--accent-blue); color:#ffffff; padding:1px 5px; border-radius:3px; font-weight:700; white-space:nowrap; flex-shrink:0;';
+            targetBadge.textContent = '分析対象';
+            labelGroup.appendChild(targetBadge);
         }
 
-        th.innerHTML = `<span>${colName}</span>${badges}`;
+        thContent.appendChild(labelGroup);
+
+        // Excel風オートフィルタ ボタン（▼）
+        const filterBtn = document.createElement('button');
+        filterBtn.type = 'button';
+        filterBtn.className = `excel-filter-btn${isFilter ? ' has-filter' : ''}`;
+        filterBtn.title = isFilter
+            ? `フィルタ適用中 (${colName}): クリックして変更または解除`
+            : `オートフィルタ (${colName}): クリックして絞り込み`;
+        filterBtn.innerHTML = isFilter ? '▼' : '▼';
+
+        filterBtn.onclick = (e) => {
+            e.stopPropagation();
+            openExcelFilterDropdown(c, filterBtn);
+        };
+
+        thContent.appendChild(filterBtn);
+        th.appendChild(thContent);
         trHead.appendChild(th);
     }
     tableHead.appendChild(trHead);
@@ -1712,7 +1686,7 @@ function renderCSVDataTable() {
 
     for (let r = startRow; r < pendingCsvRows.length; r++) {
         const row = pendingCsvRows[r];
-        const isMatched = rowMatchesCSVFilters(row, csvFilterRules, isFilterEnabled);
+        const isMatched = rowMatchesExcelFilters(row, excelColumnFilters);
         if (isMatched) totalMatchedRows++;
 
         if (onlyMatched && !isMatched) {
@@ -1760,7 +1734,7 @@ function renderCSVDataTable() {
         tdMore.style.color = 'var(--text-muted)';
         tdMore.style.fontSize = '11px';
         tdMore.style.background = 'rgba(0,0,0,0.1)';
-        tdMore.textContent = `※ 表示パフォーマンスのため先頭 ${maxDisplayRows} 行を表示中（全 ${displayedRows.toLocaleString()} 行）`;
+        tdMore.textContent = `※ パフォーマンス保護のため先頭 ${maxDisplayRows} 行を表示中（該当 ${totalMatchedRows.toLocaleString()} 行）`;
         trMore.appendChild(tdMore);
         tableBody.appendChild(trMore);
     }
@@ -1770,10 +1744,10 @@ function renderCSVDataTable() {
         const tdEmpty = document.createElement('td');
         tdEmpty.colSpan = colCount + 1;
         tdEmpty.style.textAlign = 'center';
-        tdEmpty.style.padding = '20px';
+        tdEmpty.style.padding = '24px 16px';
         tdEmpty.style.color = '#EF4444';
         tdEmpty.style.fontWeight = '600';
-        tdEmpty.textContent = '⚠️ 条件に一致する行がありません。絞り込み条件を見直してください。';
+        tdEmpty.innerHTML = '⚠️ 条件に一致する行がありません。列ヘッダーの▼ボタンからフィルタ条件を解除・変更してください。';
         trEmpty.appendChild(tdEmpty);
         tableBody.appendChild(trEmpty);
     }
@@ -1789,23 +1763,21 @@ function updateCSVModalPreview() {
     const csvMatchingCount = document.getElementById('csv-matching-count');
     const csvTotalCount = document.getElementById('csv-total-count');
     const csvMatchingPercent = document.getElementById('csv-matching-percent');
-    const csvFilterSummaryBadge = document.getElementById('csv-filter-summary-badge');
     const csvFooterTotal = document.getElementById('csv-footer-total');
     const csvFooterMatched = document.getElementById('csv-footer-matched');
-    const isFilterEnabled = document.getElementById('csv-enable-filter-check')?.checked ?? false;
 
     const hasHeader = csvHasHeaderCheck ? csvHasHeaderCheck.checked : true;
     const startRow = hasHeader ? 1 : 0;
     const totalDataRows = Math.max(0, pendingCsvRows.length - startRow);
 
-    const matchedIndices = [];
+    const isFiltered = excelColumnFilters.size > 0;
+    let matchedCount = 0;
     for (let r = startRow; r < pendingCsvRows.length; r++) {
-        if (rowMatchesCSVFilters(pendingCsvRows[r], csvFilterRules, isFilterEnabled)) {
-            matchedIndices.push(r);
+        if (rowMatchesExcelFilters(pendingCsvRows[r], excelColumnFilters)) {
+            matchedCount++;
         }
     }
 
-    const matchedCount = matchedIndices.length;
     const percent = totalDataRows > 0 ? Math.round((matchedCount / totalDataRows) * 100) : 0;
 
     if (csvMatchingCount) csvMatchingCount.textContent = matchedCount.toLocaleString();
@@ -1815,26 +1787,20 @@ function updateCSVModalPreview() {
     if (csvFooterTotal) csvFooterTotal.textContent = totalDataRows.toLocaleString();
     if (csvFooterMatched) csvFooterMatched.textContent = matchedCount.toLocaleString();
 
-    if (csvFilterSummaryBadge) {
-        if (isFilterEnabled) {
-            csvFilterSummaryBadge.style.display = 'inline-block';
-            csvFilterSummaryBadge.textContent = `${matchedCount.toLocaleString()} / ${totalDataRows.toLocaleString()} 行 抽出`;
-        } else {
-            csvFilterSummaryBadge.style.display = 'none';
-        }
-    }
-
     if (matchedCount === 0) {
         if (csvConfirmBtn) csvConfirmBtn.disabled = true;
         if (csvConfirmBtnText) csvConfirmBtnText.textContent = '一致する行がありません';
     } else {
         if (csvConfirmBtn) csvConfirmBtn.disabled = false;
         if (csvConfirmBtnText) {
-            csvConfirmBtnText.textContent = isFilterEnabled
-                ? `条件に一致する ${matchedCount.toLocaleString()} 行で分析を実行`
+            csvConfirmBtnText.textContent = isFiltered
+                ? `絞り込んだ ${matchedCount.toLocaleString()} 行で分析を実行`
                 : `選択した列 (${totalDataRows.toLocaleString()} 行) で分析を実行`;
         }
     }
+
+    // 上部アクティブフィルタバーの更新
+    renderExcelActiveFiltersBar();
 
     // テーブルの再描画
     renderCSVDataTable();
@@ -1847,14 +1813,12 @@ function initCSVModalListeners() {
     const csvConfirmBtn = document.getElementById('csv-confirm-btn');
     const csvColumnSelect = document.getElementById('csv-column-select');
     const csvHasHeaderCheck = document.getElementById('csv-has-header-check');
-    const csvEnableFilterCheck = document.getElementById('csv-enable-filter-check');
-    const csvFilterToggleHeader = document.getElementById('csv-filter-toggle-header');
-    const csvFilterPanel = document.getElementById('csv-filter-panel');
-    const csvAddFilterBtn = document.getElementById('csv-add-filter-btn');
+    const csvClearAllFiltersBtn = document.getElementById('csv-clear-all-filters-btn');
     const csvTableOnlyMatchedCheck = document.getElementById('csv-table-only-matched-check');
     const openCsvViewerBtn = document.getElementById('open-csv-viewer-btn');
 
     function closeModal() {
+        closeExcelFilterDropdown();
         if (csvModalOverlay) csvModalOverlay.style.display = 'none';
     }
 
@@ -1869,76 +1833,17 @@ function initCSVModalListeners() {
         };
     }
 
+    if (csvClearAllFiltersBtn) {
+        csvClearAllFiltersBtn.onclick = () => {
+            excelColumnFilters.clear();
+            closeExcelFilterDropdown();
+            updateCSVModalPreview();
+        };
+    }
+
     if (csvTableOnlyMatchedCheck) {
         csvTableOnlyMatchedCheck.onchange = () => {
             renderCSVDataTable();
-        };
-    }
-
-    if (csvEnableFilterCheck) {
-        csvEnableFilterCheck.onchange = () => {
-            const isEnabled = csvEnableFilterCheck.checked;
-            if (csvFilterPanel) {
-                csvFilterPanel.style.display = isEnabled ? 'block' : 'none';
-            }
-            if (csvFilterToggleHeader) {
-                if (isEnabled) csvFilterToggleHeader.classList.add('is-open');
-                else csvFilterToggleHeader.classList.remove('is-open');
-            }
-            if (isEnabled && csvFilterRules.length === 0 && pendingCsvRows) {
-                const colCount = getCSVColCount(pendingCsvRows);
-                const selCol = parseInt(csvColumnSelect?.value) || 0;
-                let defaultCol = selCol === 0 && colCount > 1 ? 1 : 0;
-                csvFilterRules.push({
-                    id: csvNextRuleId++,
-                    colIdx: defaultCol,
-                    matchType: 'exact_or',
-                    selectedValues: new Set(),
-                    customKeywords: [],
-                    searchQuery: ''
-                });
-                renderCSVFilterRules();
-            }
-            updateCSVModalPreview();
-        };
-    }
-
-    if (csvFilterToggleHeader) {
-        csvFilterToggleHeader.onclick = (e) => {
-            if (e.target === csvEnableFilterCheck || (e.target && e.target.tagName === 'INPUT')) {
-                return;
-            }
-            if (csvEnableFilterCheck) {
-                csvEnableFilterCheck.checked = !csvEnableFilterCheck.checked;
-                csvEnableFilterCheck.dispatchEvent(new Event('change'));
-            }
-        };
-    }
-
-    if (csvAddFilterBtn) {
-        csvAddFilterBtn.onclick = () => {
-            if (!pendingCsvRows) return;
-            const colCount = getCSVColCount(pendingCsvRows);
-            const selCol = parseInt(csvColumnSelect?.value) || 0;
-            // 未使用の列を優先選択
-            const usedCols = new Set(csvFilterRules.map(r => r.colIdx));
-            let newCol = 0;
-            for (let c = 0; c < colCount; c++) {
-                if (c !== selCol && !usedCols.has(c)) {
-                    newCol = c;
-                    break;
-                }
-            }
-            csvFilterRules.push({
-                id: csvNextRuleId++,
-                colIdx: newCol,
-                matchType: 'exact_or',
-                selectedValues: new Set(),
-                customKeywords: [],
-                searchQuery: ''
-            });
-            renderCSVFilterRules();
-            updateCSVModalPreview();
         };
     }
 
@@ -1949,7 +1854,7 @@ function initCSVModalListeners() {
 
             const hasHeader = csvHasHeaderCheck ? csvHasHeaderCheck.checked : true;
             const startRow = hasHeader ? 1 : 0;
-            const isFilterEnabled = csvEnableFilterCheck ? csvEnableFilterCheck.checked : false;
+            const isFiltered = excelColumnFilters.size > 0;
 
             const extractedTextLines = [];
             let totalDataRows = 0;
@@ -1957,7 +1862,7 @@ function initCSVModalListeners() {
 
             for (let r = startRow; r < pendingCsvRows.length; r++) {
                 totalDataRows++;
-                if (rowMatchesCSVFilters(pendingCsvRows[r], csvFilterRules, isFilterEnabled)) {
+                if (rowMatchesExcelFilters(pendingCsvRows[r], excelColumnFilters)) {
                     matchedRows++;
                     if (pendingCsvRows[r] && pendingCsvRows[r][selectedCol] !== undefined) {
                         const val = pendingCsvRows[r][selectedCol].trim();
@@ -1967,15 +1872,15 @@ function initCSVModalListeners() {
             }
 
             if (extractedTextLines.length === 0) {
-                alert("指定した条件に見合う行に、有効なテキストデータが見つかりませんでした。別の条件や列をお試しください。");
+                alert("指定した条件に見合う行に、有効なテキストデータが見つかりませんでした。別のフィルタ条件や列をお試しください。");
                 return;
             }
 
             closeModal();
 
             if (fileInfo) {
-                if (isFilterEnabled) {
-                    fileInfo.innerText = `${pendingCsvFileName || 'CSVファイル'} [条件抽出: ${matchedRows.toLocaleString()}/${totalDataRows.toLocaleString()}行]`;
+                if (isFiltered) {
+                    fileInfo.innerText = `${pendingCsvFileName || 'CSVファイル'} [オートフィルタ: ${matchedRows.toLocaleString()}/${totalDataRows.toLocaleString()}行]`;
                 } else {
                     fileInfo.innerText = `${pendingCsvFileName || 'CSVファイル'} [全${totalDataRows.toLocaleString()}行]`;
                 }

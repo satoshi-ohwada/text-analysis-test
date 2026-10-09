@@ -525,32 +525,32 @@
                         <label class="checkbox-container" style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin: 0; cursor: pointer;">
                             <input type="checkbox" id="csv-has-header-check" checked> 1行目を項目名（ヘッダー）とする
                         </label>
-                        <label class="checkbox-container" style="font-size: 12px; font-weight: 600; color: var(--accent-blue); margin: 0; cursor: pointer;">
-                            <input type="checkbox" id="csv-enable-filter-check"> 条件で行を絞り込む（フィルタ）
-                        </label>
-                    </div>
-                </div>
-
-                <!-- 行の絞り込みパネル（チェック時のみ展開） -->
-                <div id="csv-filter-panel" style="display: none; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; background: rgba(0,0,0,0.22); max-height: 180px; overflow-y: auto;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                        <span style="font-size: 11.5px; color: var(--text-muted);">💡 例: 「属性列が 1 または 2」かつ「日付列が 2026-01を含む」などの条件を設定できます</span>
-                        <button type="button" id="csv-add-filter-btn" class="btn btn-secondary btn-xs" style="font-size: 11px; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;">
-                            <span>＋ 条件を追加 (AND)</span>
-                        </button>
-                    </div>
-                    <div id="csv-filter-rules-list" style="display: flex; flex-direction: column; gap: 8px;">
-                        <!-- 動的にフィルタルールが生成されます -->
                     </div>
                 </div>
             </div>
 
             <!-- 中央: データ閲覧テーブル（主役！利用可能領域いっぱいに広がる） -->
             <div style="flex: 1; min-height: 200px; display: flex; flex-direction: column; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-body); padding: 10px; overflow: hidden; margin-bottom: 10px;">
+                <!-- 適用中のExcelフィルタ バー -->
+                <div id="csv-active-filters-bar" class="excel-active-filters-bar" style="display: none;">
+                    <span style="font-weight: 700; color: var(--text-secondary); display: flex; align-items: center; gap: 4px;">
+                        <span>🔍</span> 絞り込み条件:
+                    </span>
+                    <div id="csv-active-filters-list" style="display: flex; flex-wrap: wrap; gap: 6px; flex: 1;">
+                        <!-- フィルタ中の列チップが動的に追加されます -->
+                    </div>
+                    <button type="button" id="csv-clear-all-filters-btn" class="btn btn-secondary btn-xs" style="font-size: 11px; padding: 2px 8px; color: #EF4444; border-color: rgba(239, 68, 68, 0.3);">
+                        すべてのフィルタを解除
+                    </button>
+                </div>
+
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; flex-shrink: 0;">
                     <div style="display: flex; align-items: center; gap: 12px;">
                         <span style="font-size: 12.5px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 4px;">
                             <span>📋</span> データ一覧プレビュー
+                        </span>
+                        <span style="font-size: 11px; color: var(--text-muted);">
+                            （各列の <strong style="color: var(--accent-blue); background: rgba(59,130,246,0.1); padding: 1px 4px; border-radius: 3px;">▼</strong> をクリックしてチェックで絞り込めます）
                         </span>
                         <label class="checkbox-container" style="font-size: 11.5px; color: var(--text-secondary); margin: 0; cursor: pointer;">
                             <input type="checkbox" id="csv-table-only-matched-check" checked> 条件一致行のみ表示
