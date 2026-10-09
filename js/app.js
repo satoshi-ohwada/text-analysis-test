@@ -1212,10 +1212,200 @@ function parseCSVText(text) {
 
 let pendingCsvFileName = "";
 // Excel風オートフィルタ: Map<colIndex, Set<string>>
-// キー: 列インデックス (number)
-// 値: 絞り込みで選択された値のSet<string>（Mapに無い列は全選択＝フィルタなし扱い）
 let excelColumnFilters = new Map();
 let currentFilterDropdown = null;
+
+// テーブル全体の行ソート状態 (列インデックス, 昇順=true/降順=false)
+let csvTableSortCol = null;
+let csvTableSortAsc = true;
+
+// ==========================================
+// 自然順ソート判定（日付順・程度の表現順・数値順・50音順）
+// ==========================================
+
+// 程度の表現の順序辞書（アンケートや評価尺度で頻出する自然な順序）
+const DEGREE_SCALE_GROUPS = [
+    // 満足度尺度
+    [
+        ["大変満足", "非常に満足", "とても満足"],
+        ["満足"],
+        ["やや満足", "どちらかといえば満足", "まあ満足"],
+        ["普通", "どちらともいえない", "どちらでもない", "中立"],
+        ["やや不満", "どちらかといえば不満"],
+        ["不満"],
+        ["大変不満", "非常に不満", "とても不満", "大いに不満"]
+    ],
+    // 評価（良し悪し）尺度
+    [
+        ["大変良い", "非常に良い", "とても良い", "極めて良い"],
+        ["良い", "よい", "良好", "優良"],
+        ["やや良い", "どちらかといえば良い", "まあ良い"],
+        ["普通", "ふつう"],
+        ["やや悪い", "どちらかといえば悪い", "少し悪い"],
+        ["悪い", "わるい", "不良"],
+        ["大変悪い", "非常に悪い", "とても悪い", "最悪"]
+    ],
+    // 同意度・共感度尺度
+    [
+        ["強くそう思う", "非常にそう思う", "大変そう思う"],
+        ["そう思う"],
+        ["ややそう思う", "どちらかといえばそう思う"],
+        ["どちらともいえない", "どちらでもない"],
+        ["あまりそう思わない", "どちらかといえばそう思わない"],
+        ["そう思わない"],
+        ["全くそう思わない", "決してそう思わない", "ぜんぜんそう思わない"]
+    ],
+    // 大小・高低・強弱・階級
+    [
+        ["特大"], ["大", "大きい"], ["中", "普通"], ["小", "小さい"], ["極小"]
+    ],
+    [
+        ["最高", "極高"], ["高", "高い"], ["中", "中等度"], ["低", "低い"], ["極低", "最低"]
+    ],
+    [
+        ["最強"], ["強", "強い"], ["中"], ["弱", "弱い"], ["最弱"]
+    ],
+    [
+        ["上", "上位", "上級"], ["中", "中位", "中級"], ["下", "下位", "初級"]
+    ],
+    [
+        ["松"], ["竹"], ["梅"]
+    ],
+    [
+        ["S", "SS", "AAA"], ["A", "AA"], ["B"], ["C"], ["D"], ["E"], ["F"]
+    ],
+    [
+        ["秀"], ["優"], ["良"], ["可"], ["不可", "不可（落第）"]
+    ],
+    // 頻度尺度
+    [
+        ["いつも", "常に", "毎日"],
+        ["よくある", "しばしば", "頻繁に", "週に数回"],
+        ["たまにある", "ときどき", "たまに", "月に数回"],
+        ["あまりない", "めったにない", "年に数回"],
+        ["まったくない", "全くない", "なし", "一度もない"]
+    ],
+    // 重要度・必要性尺度
+    [
+        ["最重要", "必須", "極めて重要", "とても必要"],
+        ["重要", "必要"],
+        ["普通", "どちらでもよい"],
+        ["あまり重要でない", "あまり必要ない"],
+        ["不要", "重要でない", "全く不要"]
+    ],
+    // 賛否・合否・有無
+    [
+        ["賛成", "大賛成"],
+        ["やや賛成"],
+        ["どちらともいえない"],
+        ["やや反対"],
+        ["反対", "大反対"]
+    ],
+    [
+        ["はい", "可", "合格", "有", "あり", "正", "OK"],
+        ["いいえ", "不可", "不合格", "無", "なし", "誤", "NG"]
+    ]
+];
+
+// 単語 -> { group, rank } のマップ
+const DEGREE_SCALE_MAP = new Map();
+DEGREE_SCALE_GROUPS.forEach((group, gIdx) => {
+    group.forEach((synonyms, rank) => {
+        synonyms.forEach(word => {
+            const normalized = word.trim().toLowerCase();
+            if (!DEGREE_SCALE_MAP.has(normalized)) {
+                DEGREE_SCALE_MAP.set(normalized, { group: gIdx, rank: rank });
+            }
+        });
+    });
+});
+
+// 日付判定関数（タイムスタンプを返却、日付でなければ null）
+function parseDateScore(val) {
+    if (!val || typeof val !== 'string') return null;
+    const s = val.trim();
+    if (!s || s === '(空白)') return null;
+
+    // YYYY/MM/DD, YYYY-MM-DD, YYYY.MM.DD (任意で時刻付き)
+    const matchYMD = s.match(/^(\d{4})[-/\.](\d{1,2})[-/\.](\d{1,2})(?:[\sT](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
+    if (matchYMD) {
+        const y = parseInt(matchYMD[1], 10);
+        const m = parseInt(matchYMD[2], 10) - 1;
+        const d = parseInt(matchYMD[3], 10);
+        const hh = matchYMD[4] ? parseInt(matchYMD[4], 10) : 0;
+        const mm = matchYMD[5] ? parseInt(matchYMD[5], 10) : 0;
+        const ss = matchYMD[6] ? parseInt(matchYMD[6], 10) : 0;
+        return new Date(y, m, d, hh, mm, ss).getTime();
+    }
+
+    // YYYY年M月D日, YYYY年M月
+    const matchJa = s.match(/^(\d{4})年(\d{1,2})月(?:(\d{1,2})日)?$/);
+    if (matchJa) {
+        const y = parseInt(matchJa[1], 10);
+        const m = parseInt(matchJa[2], 10) - 1;
+        const d = matchJa[3] ? parseInt(matchJa[3], 10) : 1;
+        return new Date(y, m, d).getTime();
+    }
+
+    // YYYY-MM, YYYY/MM
+    const matchYM = s.match(/^(\d{4})[-/\.](\d{1,2})$/);
+    if (matchYM) {
+        const y = parseInt(matchYM[1], 10);
+        const m = parseInt(matchYM[2], 10) - 1;
+        return new Date(y, m, 1).getTime();
+    }
+
+    // M月D日
+    const matchMD = s.match(/^(\d{1,2})月(\d{1,2})日$/);
+    if (matchMD) {
+        const m = parseInt(matchMD[1], 10) - 1;
+        const d = parseInt(matchMD[2], 10);
+        return new Date(2000, m, d).getTime();
+    }
+
+    return null;
+}
+
+// 2つのCSVセル値の自然順比較（日付順、程度の表現順、数値順、50音自然順）
+function compareCSVValues(a, b) {
+    if (a === b) return 0;
+    // (空白) は常に最後
+    if (a === '(空白)') return 1;
+    if (b === '(空白)') return -1;
+    if (!a) return 1;
+    if (!b) return -1;
+
+    // 1. 日付判定
+    const dateA = parseDateScore(a);
+    const dateB = parseDateScore(b);
+    if (dateA !== null && dateB !== null) {
+        if (dateA !== dateB) return dateA - dateB;
+        return a.localeCompare(b, 'ja');
+    }
+
+    // 2. 程度の表現判定（同一スケールグループ内であればランク順）
+    const normA = a.trim().toLowerCase();
+    const normB = b.trim().toLowerCase();
+    const degA = DEGREE_SCALE_MAP.get(normA);
+    const degB = DEGREE_SCALE_MAP.get(normB);
+    if (degA && degB && degA.group === degB.group) {
+        if (degA.rank !== degB.rank) {
+            return degA.rank - degB.rank;
+        }
+    }
+
+    // 3. 純粋な数値判定 (半角・全角対応)
+    const numA = Number(a.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)));
+    const numB = Number(b.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)));
+    const isNumA = !isNaN(numA) && a.trim() !== '';
+    const isNumB = !isNaN(numB) && b.trim() !== '';
+    if (isNumA && isNumB) {
+        if (numA !== numB) return numA - numB;
+    }
+
+    // 4. 数値混じり自然順ソート (例: 10代 vs 20代, 第1回 vs 第10回)
+    return a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
+}
 
 function getCSVColCount(rows) {
     return rows && rows.length > 0 ? Math.max(...rows.map(r => r.length)) : 0;
@@ -1255,9 +1445,9 @@ function getCSVColumnValueCounts(colIdx, rows, hasHeader) {
         counts.set(val, (counts.get(val) || 0) + 1);
     }
 
+    // 自然な順序（日付順、程度の表現順、数値順、50音自然順）でソート
     return Array.from(counts.entries()).sort((a, b) => {
-        if (b[1] !== a[1]) return b[1] - a[1];
-        return a[0].localeCompare(b[0], 'ja');
+        return compareCSVValues(a[0], b[0]);
     });
 }
 
@@ -1306,6 +1496,43 @@ function openExcelFilterDropdown(colIdx, buttonElem) {
     header.appendChild(title);
     header.appendChild(closeBtn);
     dropdown.appendChild(header);
+
+    // ソートボタンバー（昇順・降順で並べ替え）
+    const sortBar = document.createElement('div');
+    sortBar.className = 'excel-filter-sort-bar';
+
+    const isAscActive = csvTableSortCol === colIdx && csvTableSortAsc;
+    const isDescActive = csvTableSortCol === colIdx && !csvTableSortAsc;
+
+    const sortAscBtn = document.createElement('button');
+    sortAscBtn.type = 'button';
+    sortAscBtn.className = `excel-sort-btn${isAscActive ? ' active' : ''}`;
+    sortAscBtn.innerHTML = `<span>↑</span> 昇順で並べ替え`;
+    sortAscBtn.title = `${colName} の値で表を昇順（日付順・数値順・自然順）に並べ替えます`;
+    sortAscBtn.onclick = (e) => {
+        e.stopPropagation();
+        csvTableSortCol = colIdx;
+        csvTableSortAsc = true;
+        closeExcelFilterDropdown();
+        renderCSVDataTable();
+    };
+
+    const sortDescBtn = document.createElement('button');
+    sortDescBtn.type = 'button';
+    sortDescBtn.className = `excel-sort-btn${isDescActive ? ' active' : ''}`;
+    sortDescBtn.innerHTML = `<span>↓</span> 降順で並べ替え`;
+    sortDescBtn.title = `${colName} の値で表を降順に並べ替えます`;
+    sortDescBtn.onclick = (e) => {
+        e.stopPropagation();
+        csvTableSortCol = colIdx;
+        csvTableSortAsc = false;
+        closeExcelFilterDropdown();
+        renderCSVDataTable();
+    };
+
+    sortBar.appendChild(sortAscBtn);
+    sortBar.appendChild(sortDescBtn);
+    dropdown.appendChild(sortBar);
 
     // 検索窓
     const searchBox = document.createElement('div');
@@ -1584,6 +1811,8 @@ function showCSVColumnModal(fileName, rows, isReopen = false) {
     if (!isReopen) {
         excelColumnFilters.clear();
         closeExcelFilterDropdown();
+        csvTableSortCol = null;
+        csvTableSortAsc = true;
     }
 
     function findBestTextColumn() {
@@ -1709,12 +1938,32 @@ function renderCSVDataTable() {
         thContent.className = 'th-content';
 
         const labelGroup = document.createElement('div');
-        labelGroup.style.cssText = 'display:flex; align-items:center; gap:4px; overflow:hidden; text-overflow:ellipsis;';
+        labelGroup.style.cssText = 'display:flex; align-items:center; gap:4px; overflow:hidden; text-overflow:ellipsis; cursor:pointer;';
+        labelGroup.title = `${colName}: クリックで並べ替え（昇順/降順）`;
+        labelGroup.onclick = (e) => {
+            e.stopPropagation();
+            if (csvTableSortCol === c) {
+                csvTableSortAsc = !csvTableSortAsc;
+            } else {
+                csvTableSortCol = c;
+                csvTableSortAsc = true;
+            }
+            renderCSVDataTable();
+        };
 
         const nameSpan = document.createElement('span');
         nameSpan.textContent = colName;
         nameSpan.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
         labelGroup.appendChild(nameSpan);
+
+        // ソート中インジケーター（▲ / ▼）
+        if (csvTableSortCol === c) {
+            const sortBadge = document.createElement('span');
+            sortBadge.style.cssText = 'font-size:10px; color:var(--accent-blue); font-weight:700; margin-left:2px; flex-shrink:0;';
+            sortBadge.textContent = csvTableSortAsc ? '▲' : '▼';
+            sortBadge.title = csvTableSortAsc ? '昇順で並べ替え中' : '降順で並べ替え中';
+            labelGroup.appendChild(sortBadge);
+        }
 
         if (isTarget) {
             const targetBadge = document.createElement('span');
@@ -1731,7 +1980,7 @@ function renderCSVDataTable() {
         filterBtn.className = `excel-filter-btn${isFilter ? ' has-filter' : ''}`;
         filterBtn.title = isFilter
             ? `フィルタ適用中 (${colName}): クリックして変更または解除`
-            : `オートフィルタ (${colName}): クリックして絞り込み`;
+            : `オートフィルタ (${colName}): クリックして絞り込み・並べ替え`;
         filterBtn.innerHTML = isFilter ? '▼' : '▼';
 
         filterBtn.onclick = (e) => {
@@ -1746,11 +1995,28 @@ function renderCSVDataTable() {
     tableHead.appendChild(trHead);
 
     // テーブルボディの生成（最大100行表示）
+    // 表示用に行インデックスのリストを作成
+    const rowIndices = [];
+    for (let r = startRow; r < pendingCsvRows.length; r++) {
+        rowIndices.push(r);
+    }
+
+    // 列ソートが指定されている場合は、自然順でソート
+    if (csvTableSortCol !== null) {
+        rowIndices.sort((idxA, idxB) => {
+            const rawA = pendingCsvRows[idxA] ? pendingCsvRows[idxA][csvTableSortCol] : '';
+            const rawB = pendingCsvRows[idxB] ? pendingCsvRows[idxB][csvTableSortCol] : '';
+            const cmp = compareCSVValues(String(rawA || '').trim(), String(rawB || '').trim());
+            return csvTableSortAsc ? cmp : -cmp;
+        });
+    }
+
     let displayedRows = 0;
     const maxDisplayRows = 100;
     let totalMatchedRows = 0;
 
-    for (let r = startRow; r < pendingCsvRows.length; r++) {
+    for (let i = 0; i < rowIndices.length; i++) {
+        const r = rowIndices[i];
         const row = pendingCsvRows[r];
         const isMatched = rowMatchesExcelFilters(row, excelColumnFilters);
         if (isMatched) totalMatchedRows++;
@@ -1771,7 +2037,7 @@ function renderCSVDataTable() {
         tdIdx.style.textAlign = 'center';
         tdIdx.style.color = 'var(--text-muted)';
         tdIdx.style.fontSize = '10.5px';
-        tdIdx.textContent = r + 1;
+        tdIdx.textContent = r + 1; // 元のCSV行番号
         tr.appendChild(tdIdx);
 
         for (let c = 0; c < colCount; c++) {
@@ -1926,14 +2192,30 @@ function initCSVModalListeners() {
             let totalDataRows = 0;
             let matchedRows = 0;
 
+            const rowIndices = [];
             for (let r = startRow; r < pendingCsvRows.length; r++) {
                 totalDataRows++;
                 if (rowMatchesExcelFilters(pendingCsvRows[r], excelColumnFilters)) {
                     matchedRows++;
-                    const rawCell = pendingCsvRows[r] ? pendingCsvRows[r][selectedCol] : '';
-                    const val = (rawCell !== undefined && rawCell !== null) ? String(rawCell).trim() : '';
-                    if (val.length > 0) extractedTextLines.push(val);
+                    rowIndices.push(r);
                 }
+            }
+
+            // テーブルで列ソートが適用されている場合は、そのソート順（自然順）に従って抽出
+            if (csvTableSortCol !== null) {
+                rowIndices.sort((idxA, idxB) => {
+                    const rawA = pendingCsvRows[idxA] ? pendingCsvRows[idxA][csvTableSortCol] : '';
+                    const rawB = pendingCsvRows[idxB] ? pendingCsvRows[idxB][csvTableSortCol] : '';
+                    const cmp = compareCSVValues(String(rawA || '').trim(), String(rawB || '').trim());
+                    return csvTableSortAsc ? cmp : -cmp;
+                });
+            }
+
+            for (let i = 0; i < rowIndices.length; i++) {
+                const r = rowIndices[i];
+                const rawCell = pendingCsvRows[r] ? pendingCsvRows[r][selectedCol] : '';
+                const val = (rawCell !== undefined && rawCell !== null) ? String(rawCell).trim() : '';
+                if (val.length > 0) extractedTextLines.push(val);
             }
 
             if (extractedTextLines.length === 0) {

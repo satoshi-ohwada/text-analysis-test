@@ -1465,8 +1465,44 @@ textarea#raw-text-input:focus {
     max-width: 220px;
 }
 
+.excel-filter-sort-bar {
+    display: flex;
+    gap: 6px;
+    padding: 6px 10px 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.excel-sort-btn {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 4px 6px;
+    font-size: 11px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-body);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.excel-sort-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    border-color: var(--accent-blue);
+}
+
+.excel-sort-btn.active {
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--accent-blue);
+    border-color: var(--accent-blue);
+    font-weight: 600;
+}
+
 .excel-filter-search-box {
-    padding: 8px 10px 6px;
+    padding: 6px 10px 6px;
 }
 
 .excel-filter-search-input {
