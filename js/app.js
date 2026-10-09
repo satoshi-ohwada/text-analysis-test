@@ -192,8 +192,34 @@ function loadSettings() {
 }
 
 async function initKuromoji() {
-    loadingOverlay.style.display = 'flex';
-    loadingText.innerText = "日本語解析辞書と除外リストをロード中...";
+    if (loadingOverlay) loadingOverlay.style.display = 'flex';
+    if (loadingText) loadingText.innerText = "日本語解析辞書と除外リストをロード中...";
+    if (progressBar) progressBar.style.width = '10%';
+
+    let isInitialized = false;
+
+    // 15秒タイムアウト監視（万が一辞書ロードがブロックまたはハングした場合の安全装置）
+    const timeoutTimer = setTimeout(() => {
+        if (!isInitialized) {
+            console.warn("Kuromoji dictionary load timed out.");
+            if (loadingText) {
+                loadingText.innerHTML = `
+                    <div style="font-weight:700; margin-bottom:8px; color:#F59E0B;">⚠️ 辞書の読み込みに時間がかかっています</div>
+                    <div style="font-size:12px; color:var(--text-secondary); line-height:1.6; margin-bottom:12px;">
+                        ブラウザで直接ファイル（file://）を開いている場合、セキュリティ制限（CORS）により辞書が取得できないことがあります。<br>
+                        VSCodeの「Live Server」やローカルWebサーバー経由で開くか、再読み込みをお試しください。
+                    </div>
+                    <button type="button" onclick="location.reload()" style="padding:6px 16px; font-size:12px; border-radius:6px; background:var(--accent-blue); color:#fff; border:none; cursor:pointer;">
+                        再読み込みする
+                    </button>
+                    <button type="button" onclick="document.getElementById('loading-overlay').style.display='none'" style="margin-left:8px; padding:6px 12px; font-size:12px; border-radius:6px; background:transparent; color:var(--text-muted); border:1px solid var(--border-color); cursor:pointer;">
+                        閉じる
+                    </button>
+                `;
+            }
+        }
+    }, 15000);
+
     try {
         // Fetch custom stop words from server
         const response = await fetch('data/stopwords.txt');
@@ -221,43 +247,74 @@ async function initKuromoji() {
         // Optional file
     }
 
-    progressBar.style.width = '50%';
+    if (progressBar) progressBar.style.width = '50%';
     const dicPath = "lib/kuromoji/dict/";
 
-    kuromoji.builder({ dicPath: dicPath }).build((err, _tokenizer) => {
-        if (err) {
-            console.error("Kuromoji initialization failed:", err);
-            loadingText.innerHTML = "エラー: 辞書の読み込みに失敗しました。<br><small style='color: #EF4444; font-family: monospace;'>" + err.toString() + "</small>";
-            loadingText.style.color = "#EF4444";
-            progressBar.style.backgroundColor = "#EF4444";
-            progressBar.style.width = '100%';
-            return;
-        }
-        
-        tokenizer = _tokenizer;
-        progressBar.style.width = '100%';
-        
-        setTimeout(() => {
-            loadingOverlay.style.display = 'none';
-        }, 500);
-        
-        loadSettings();
+    try {
+        kuromoji.builder({ dicPath: dicPath }).build((err, _tokenizer) => {
+            isInitialized = true;
+            clearTimeout(timeoutTimer);
 
-        // If local storage has no custom rules yet, initialize from data/custom_rules.txt if present
-        if (customCompoundWords.size === 0 && customStopWords.size === 0 && customSynonymRules.size === 0 && defaultCustomRulesText) {
-            const parsed = parseRulesText(defaultCustomRulesText);
-            if (parsed.compoundWords.size > 0 || parsed.stopWords.size > 0 || parsed.synonymRules.size > 0) {
-                customCompoundWords = parsed.compoundWords;
-                customStopWords = parsed.stopWords;
-                customSynonymRules = parsed.synonymRules;
-                saveSettings();
+            if (err) {
+                console.error("Kuromoji initialization failed:", err);
+                if (loadingText) {
+                    loadingText.innerHTML = `
+                        <div style="color:#EF4444; font-weight:700; margin-bottom:8px;">❌ 日本語解析辞書の読み込みに失敗しました</div>
+                        <div style="font-size:11.5px; color:var(--text-muted); margin-bottom:12px;">${err.toString()}</div>
+                        <div style="font-size:12px; color:var(--text-secondary); line-height:1.5; margin-bottom:12px;">
+                            ※ ローカルファイル（file://）として直接開いている場合は、ブラウザの制約により辞書ファイルが取得できません。<br>
+                            ローカルサーバー（Live Serverやpython -m http.serverなど）経由で開いてください。
+                        </div>
+                        <button type="button" onclick="location.reload()" style="padding:6px 16px; font-size:12px; border-radius:6px; background:var(--accent-blue); color:#fff; border:none; cursor:pointer;">
+                            再試行
+                        </button>
+                    `;
+                }
+                if (progressBar) {
+                    progressBar.style.backgroundColor = "#EF4444";
+                    progressBar.style.width = '100%';
+                }
+                return;
             }
+            
+            tokenizer = _tokenizer;
+            if (progressBar) progressBar.style.width = '100%';
+            
+            setTimeout(() => {
+                if (loadingOverlay) loadingOverlay.style.display = 'none';
+            }, 300);
+            
+            try {
+                loadSettings();
+
+                // If local storage has no custom rules yet, initialize from data/custom_rules.txt if present
+                if (customCompoundWords.size === 0 && customStopWords.size === 0 && customSynonymRules.size === 0 && defaultCustomRulesText) {
+                    const parsed = parseRulesText(defaultCustomRulesText);
+                    if (parsed.compoundWords.size > 0 || parsed.stopWords.size > 0 || parsed.synonymRules.size > 0) {
+                        customCompoundWords = parsed.compoundWords;
+                        customStopWords = parsed.stopWords;
+                        customSynonymRules = parsed.synonymRules;
+                        saveSettings();
+                    }
+                }
+                
+                renderStopWords();
+                renderCompoundWords();
+                renderSynonymRules();
+            } catch (settingsErr) {
+                console.error("Error setting up rules:", settingsErr);
+            }
+        });
+    } catch (buildErr) {
+        clearTimeout(timeoutTimer);
+        console.error("Kuromoji builder error:", buildErr);
+        if (loadingText) {
+            loadingText.innerHTML = `
+                <div style="color:#EF4444; font-weight:700;">❌ 辞書ビルダーの初期化に失敗しました</div>
+                <div style="font-size:11.5px; color:var(--text-muted);">${buildErr.toString()}</div>
+            `;
         }
-        
-        renderStopWords();
-        renderCompoundWords();
-        renderSynonymRules();
-    });
+    }
 }
 
 function renderStopWords() {
@@ -876,7 +933,7 @@ analyzeRawTextBtn.addEventListener('click', () => {
 function loadTextAndTokenize(text) {
     const taskId = ++currentTokenizeTaskId;
     if (!tokenizer) {
-        alert("辞書の読み込みが完了していません。しばらくお待ちください。");
+        alert("日本語辞書の読み込みが完了していません。画面のロード完了をお待ちいただくか、再読み込みをお試しください。");
         return;
     }
     rawTextData = text;
@@ -889,6 +946,7 @@ function loadTextAndTokenize(text) {
 
     if (lines.length === 0) {
         alert("有効なテキストデータが見つかりませんでした。");
+        if (loadingOverlay) loadingOverlay.style.display = 'none';
         return;
     }
 
@@ -902,7 +960,10 @@ function loadTextAndTokenize(text) {
 
     function processChunk() {
         try {
-            if (taskId !== currentTokenizeTaskId) return;
+            if (taskId !== currentTokenizeTaskId) {
+                if (loadingOverlay) loadingOverlay.style.display = 'none';
+                return;
+            }
             const endIndex = Math.min(currentIndex + chunkSize, lines.length);
             for (let i = currentIndex; i < endIndex; i++) {
                 const lineStr = String(lines[i] || '').trim();
@@ -920,7 +981,12 @@ function loadTextAndTokenize(text) {
                 setTimeout(processChunk, 0);
             } else {
                 if (loadingOverlay) loadingOverlay.style.display = 'none';
-                processAndRender();
+                try {
+                    processAndRender();
+                } catch (renderErr) {
+                    console.error("Rendering error:", renderErr);
+                    alert("描画処理中にエラーが発生しました:\n" + renderErr.message);
+                }
             }
         } catch (err) {
             console.error("Tokenization error:", err);
@@ -1864,10 +1930,9 @@ function initCSVModalListeners() {
                 totalDataRows++;
                 if (rowMatchesExcelFilters(pendingCsvRows[r], excelColumnFilters)) {
                     matchedRows++;
-                    if (pendingCsvRows[r] && pendingCsvRows[r][selectedCol] !== undefined) {
-                        const val = pendingCsvRows[r][selectedCol].trim();
-                        if (val.length > 0) extractedTextLines.push(val);
-                    }
+                    const rawCell = pendingCsvRows[r] ? pendingCsvRows[r][selectedCol] : '';
+                    const val = (rawCell !== undefined && rawCell !== null) ? String(rawCell).trim() : '';
+                    if (val.length > 0) extractedTextLines.push(val);
                 }
             }
 
@@ -1894,7 +1959,6 @@ function initCSVModalListeners() {
         };
     }
 }
-initCSVModalListeners();
 
 function handleFile(file) {
     fileInfo.innerText = `${file.name} (${Math.round(file.size / 1024)} KB)`;
@@ -6299,12 +6363,18 @@ if (sidebarRelayoutBtn) {
     sidebarRelayoutBtn.addEventListener('click', triggerRelayout);
 }
 
-// Run Initialization on Load
-window.addEventListener('DOMContentLoaded', () => {
+// Run Initialization on Load (Guaranteed to execute even if DOMContentLoaded already fired)
+function startApp() {
     initKuromoji();
     updateClusterCountGroupVisibility();
     initCSVModalListeners();
-});
+}
+
+if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', startApp);
+} else {
+    startApp();
+}
 
 // ==========================================
 // KWIC (Key Word In Context) Functionality
