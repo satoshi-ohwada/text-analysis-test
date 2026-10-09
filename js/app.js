@@ -1377,6 +1377,277 @@ function showCSVColumnModal(fileName, rows, isReopen = false) {
     populateColumnOptions();
 }
 
+function renderCSVFilterRules() {
+    const rulesList = document.getElementById('csv-filter-rules-list');
+    if (!rulesList || !pendingCsvRows) return;
+
+    rulesList.innerHTML = '';
+    const hasHeader = document.getElementById('csv-has-header-check')?.checked ?? true;
+    const colCount = getCSVColCount(pendingCsvRows);
+
+    csvFilterRules.forEach((rule, index) => {
+        const card = document.createElement('div');
+        card.className = 'csv-filter-rule-card';
+
+        // ヘッダー（列選択、条件形式、削除ボタン）
+        const headerRow = document.createElement('div');
+        headerRow.style.display = 'flex';
+        headerRow.style.alignItems = 'center';
+        headerRow.style.justifyContent = 'space-between';
+        headerRow.style.gap = '8px';
+        headerRow.style.marginBottom = '8px';
+        headerRow.style.flexWrap = 'wrap';
+
+        const leftGroup = document.createElement('div');
+        leftGroup.style.display = 'flex';
+        leftGroup.style.alignItems = 'center';
+        leftGroup.style.gap = '6px';
+        leftGroup.style.flex = '1';
+        leftGroup.style.minWidth = '220px';
+
+        const colLabel = document.createElement('span');
+        colLabel.style.fontSize = '12px';
+        colLabel.style.fontWeight = '600';
+        colLabel.style.color = 'var(--text-secondary)';
+        colLabel.style.whiteSpace = 'nowrap';
+        colLabel.textContent = `条件 ${index + 1}:`;
+        leftGroup.appendChild(colLabel);
+
+        const colSelect = document.createElement('select');
+        colSelect.className = 'select-control';
+        colSelect.style.flex = '1';
+        colSelect.style.fontSize = '12px';
+        colSelect.style.padding = '4px 8px';
+        colSelect.style.height = '30px';
+
+        for (let c = 0; c < colCount; c++) {
+            const opt = document.createElement('option');
+            opt.value = c;
+            const colName = getCSVColumnName(c, pendingCsvRows, hasHeader);
+            opt.textContent = `[ ${c + 1}列目 ] ${colName}`;
+            if (c === rule.colIdx) opt.selected = true;
+            colSelect.appendChild(opt);
+        }
+
+        colSelect.onchange = () => {
+            rule.colIdx = parseInt(colSelect.value) || 0;
+            rule.selectedValues.clear();
+            rule.customKeywords = [];
+            rule.searchQuery = '';
+            renderCSVFilterRules();
+            updateCSVModalPreview();
+        };
+        leftGroup.appendChild(colSelect);
+        headerRow.appendChild(leftGroup);
+
+        const rightGroup = document.createElement('div');
+        rightGroup.style.display = 'flex';
+        rightGroup.style.alignItems = 'center';
+        rightGroup.style.gap = '6px';
+
+        const typeSelect = document.createElement('select');
+        typeSelect.className = 'select-control';
+        typeSelect.style.fontSize = '12px';
+        typeSelect.style.padding = '4px 6px';
+        typeSelect.style.height = '30px';
+
+        const optExact = document.createElement('option');
+        optExact.value = 'exact_or';
+        optExact.textContent = 'いずれかに一致 (OR)';
+        if (rule.matchType === 'exact_or') optExact.selected = true;
+        typeSelect.appendChild(optExact);
+
+        const optPartial = document.createElement('option');
+        optPartial.value = 'partial_or';
+        optPartial.textContent = 'いずれかを含む (部分一致)';
+        if (rule.matchType === 'partial_or') optPartial.selected = true;
+        typeSelect.appendChild(optPartial);
+
+        const optExclude = document.createElement('option');
+        optExclude.value = 'exclude';
+        optExclude.textContent = '含まない (除外)';
+        if (rule.matchType === 'exclude') optExclude.selected = true;
+        typeSelect.appendChild(optExclude);
+
+        typeSelect.onchange = () => {
+            rule.matchType = typeSelect.value;
+            updateCSVModalPreview();
+        };
+        rightGroup.appendChild(typeSelect);
+
+        if (csvFilterRules.length > 1) {
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'btn btn-secondary btn-xs';
+            delBtn.title = 'この条件を削除';
+            delBtn.style.padding = '4px 8px';
+            delBtn.style.color = '#EF4444';
+            delBtn.innerHTML = '✕';
+            delBtn.onclick = () => {
+                csvFilterRules = csvFilterRules.filter(r => r.id !== rule.id);
+                renderCSVFilterRules();
+                updateCSVModalPreview();
+            };
+            rightGroup.appendChild(delBtn);
+        }
+        headerRow.appendChild(rightGroup);
+        card.appendChild(headerRow);
+
+        // キーワード入力・検索 & クイック選択バー
+        const actionRow = document.createElement('div');
+        actionRow.style.display = 'flex';
+        actionRow.style.gap = '6px';
+        actionRow.style.alignItems = 'center';
+        actionRow.style.marginBottom = '6px';
+
+        const kwInput = document.createElement('input');
+        kwInput.type = 'text';
+        kwInput.placeholder = 'カンマ区切りで複数指定（例: 30代, 40代）または候補絞り込み...';
+        kwInput.style.flex = '1';
+        kwInput.style.fontSize = '12px';
+        kwInput.style.padding = '4px 8px';
+        kwInput.style.height = '28px';
+        kwInput.style.borderRadius = '4px';
+        kwInput.style.border = '1px solid var(--border-color)';
+        kwInput.style.background = 'var(--bg-surface)';
+        kwInput.style.color = 'var(--text-primary)';
+        kwInput.style.outline = 'none';
+
+        if (rule.searchQuery) {
+            kwInput.value = rule.searchQuery;
+        }
+
+        const valueCounts = getCSVColumnValueCounts(rule.colIdx, pendingCsvRows, hasHeader);
+
+        const selectAllBtn = document.createElement('button');
+        selectAllBtn.type = 'button';
+        selectAllBtn.className = 'btn btn-secondary btn-xs';
+        selectAllBtn.style.fontSize = '11px';
+        selectAllBtn.style.padding = '2px 8px';
+        selectAllBtn.style.height = '28px';
+        selectAllBtn.textContent = '全選択';
+
+        const clearAllBtn = document.createElement('button');
+        clearAllBtn.type = 'button';
+        clearAllBtn.className = 'btn btn-secondary btn-xs';
+        clearAllBtn.style.fontSize = '11px';
+        clearAllBtn.style.padding = '2px 8px';
+        clearAllBtn.style.height = '28px';
+        clearAllBtn.textContent = '全解除';
+
+        actionRow.appendChild(kwInput);
+        actionRow.appendChild(selectAllBtn);
+        actionRow.appendChild(clearAllBtn);
+        card.appendChild(actionRow);
+
+        // チップコンテナ
+        const chipsContainer = document.createElement('div');
+        chipsContainer.style.maxHeight = '110px';
+        chipsContainer.style.overflowY = 'auto';
+        chipsContainer.style.display = 'flex';
+        chipsContainer.style.flexWrap = 'wrap';
+        chipsContainer.style.gap = '5px';
+        chipsContainer.style.padding = '6px';
+        chipsContainer.style.background = 'var(--bg-surface)';
+        chipsContainer.style.border = '1px solid var(--border-color)';
+        chipsContainer.style.borderRadius = '4px';
+
+        function updateChipsView() {
+            chipsContainer.innerHTML = '';
+            const query = (rule.searchQuery || '').trim().toLowerCase();
+
+            let visibleCount = 0;
+            const maxVisible = 60;
+
+            for (const [val, count] of valueCounts) {
+                if (query && !val.toLowerCase().includes(query)) {
+                    continue;
+                }
+                visibleCount++;
+                if (visibleCount > maxVisible) break;
+
+                const chip = document.createElement('div');
+                const isSelected = rule.selectedValues.has(val);
+                chip.className = `csv-filter-chip${isSelected ? ' active' : ''}`;
+                chip.innerHTML = `<span>${val}</span><span class="chip-count">(${count.toLocaleString()})</span>`;
+
+                chip.onclick = () => {
+                    if (rule.selectedValues.has(val)) {
+                        rule.selectedValues.delete(val);
+                    } else {
+                        rule.selectedValues.add(val);
+                    }
+                    updateChipsView();
+                    updateCSVModalPreview();
+                };
+                chipsContainer.appendChild(chip);
+            }
+
+            if (visibleCount === 0) {
+                const emptyMsg = document.createElement('div');
+                emptyMsg.style.fontSize = '11.5px';
+                emptyMsg.style.color = 'var(--text-muted)';
+                emptyMsg.style.padding = '4px';
+                emptyMsg.textContent = '一致する候補値がありません';
+                chipsContainer.appendChild(emptyMsg);
+            } else if (valueCounts.length > maxVisible && !query) {
+                const moreMsg = document.createElement('div');
+                moreMsg.style.fontSize = '10.5px';
+                moreMsg.style.color = 'var(--text-muted)';
+                moreMsg.style.alignSelf = 'center';
+                moreMsg.style.padding = '0 4px';
+                moreMsg.textContent = `他 ${valueCounts.length - maxVisible} 件（検索バーで絞り込み可）`;
+                chipsContainer.appendChild(moreMsg);
+            }
+        }
+
+        function handleInputKeywords() {
+            const raw = kwInput.value;
+            rule.searchQuery = raw;
+
+            const tokens = raw.split(/[,、\n\r]+/).map(t => t.trim()).filter(t => t.length > 0);
+            rule.customKeywords = tokens;
+
+            for (const token of tokens) {
+                for (const [val] of valueCounts) {
+                    if (val.toLowerCase() === token.toLowerCase()) {
+                        rule.selectedValues.add(val);
+                    }
+                }
+            }
+
+            updateChipsView();
+            updateCSVModalPreview();
+        }
+
+        kwInput.oninput = handleInputKeywords;
+
+        selectAllBtn.onclick = () => {
+            const query = (rule.searchQuery || '').trim().toLowerCase();
+            for (const [val] of valueCounts) {
+                if (!query || val.toLowerCase().includes(query)) {
+                    rule.selectedValues.add(val);
+                }
+            }
+            updateChipsView();
+            updateCSVModalPreview();
+        };
+
+        clearAllBtn.onclick = () => {
+            rule.selectedValues.clear();
+            rule.customKeywords = [];
+            kwInput.value = '';
+            rule.searchQuery = '';
+            updateChipsView();
+            updateCSVModalPreview();
+        };
+
+        updateChipsView();
+        card.appendChild(chipsContainer);
+        rulesList.appendChild(card);
+    });
+}
+
 function renderCSVDataTable() {
     const tableHead = document.getElementById('csv-data-table-head');
     const tableBody = document.getElementById('csv-data-table-body');
