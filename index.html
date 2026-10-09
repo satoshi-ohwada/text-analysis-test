@@ -250,9 +250,12 @@
                     </button>
                     <input type="file" id="rules-file-input" accept=".txt,.text" style="display: none;">
                 </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; padding-top: 2px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; padding-top: 2px; gap: 4px; flex-wrap: wrap;">
                     <button class="btn-link" id="download-template-btn" style="background: none; border: none; color: var(--accent-blue); padding: 0; cursor: pointer; text-decoration: underline; font-size: 10.5px;">
-                        書き方・見本ファイルをDL
+                        見本ファイルをDL
+                    </button>
+                    <button class="btn-link" id="reload-default-rules-btn" style="background: none; border: none; color: var(--accent-blue); padding: 0; cursor: pointer; text-decoration: underline; font-size: 10.5px;" title="サーバー／GitHub上の data/custom_rules.txt の最新内容を再読み込みして適用します">
+                        標準ルール再読込
                     </button>
                     <button class="btn-link" id="clear-all-rules-btn" style="background: none; border: none; color: #EF4444; padding: 0; cursor: pointer; text-decoration: underline; font-size: 10.5px;" title="画面上の複合語・除外ワード・置換ルールをすべてクリアします">
                         全設定クリア

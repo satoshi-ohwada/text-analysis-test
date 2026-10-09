@@ -130,6 +130,7 @@ const exportRulesBtn = document.getElementById('export-rules-btn');
 const importRulesBtn = document.getElementById('import-rules-btn');
 const rulesFileInput = document.getElementById('rules-file-input');
 const downloadTemplateBtn = document.getElementById('download-template-btn');
+const reloadDefaultRulesBtn = document.getElementById('reload-default-rules-btn');
 const clearAllRulesBtn = document.getElementById('clear-all-rules-btn');
 
 // Export & Relayout Action Buttons
@@ -224,8 +225,9 @@ async function initKuromoji() {
     }, 15000);
 
     try {
-        // Fetch custom stop words from server
-        const response = await fetch('data/stopwords.txt');
+        // Fetch custom stop words from server with cache-busting
+        const cacheBuster = `?_=${Date.now()}`;
+        const response = await fetch(`data/stopwords.txt${cacheBuster}`, { cache: 'no-cache' });
         if (response.ok) {
             const text = await response.text();
             const words = text.split('\n')
@@ -241,8 +243,9 @@ async function initKuromoji() {
 
     let defaultCustomRulesText = null;
     try {
-        // Check for workspace default custom_rules.txt
-        const rulesResp = await fetch('data/custom_rules.txt');
+        // Check for workspace default custom_rules.txt with cache-busting
+        const cacheBuster = `?_=${Date.now()}`;
+        const rulesResp = await fetch(`data/custom_rules.txt${cacheBuster}`, { cache: 'no-cache' });
         if (rulesResp.ok) {
             defaultCustomRulesText = await rulesResp.text();
         }
@@ -290,8 +293,13 @@ async function initKuromoji() {
             try {
                 loadSettings();
 
-                // If local storage has no custom rules yet, initialize from data/custom_rules.txt if present
-                if (customCompoundWords.size === 0 && customStopWords.size === 0 && customSynonymRules.size === 0 && defaultCustomRulesText) {
+                // If local storage has no custom rules and has never been explicitly cleared, initialize from data/custom_rules.txt
+                const isExplicitlyCleared = localStorage.getItem('customRulesCleared') === 'true';
+                const hasExistingStorage = localStorage.getItem('customCompoundWords') !== null ||
+                                           localStorage.getItem('customStopWords') !== null ||
+                                           localStorage.getItem('customSynonymRules') !== null;
+
+                if (!isExplicitlyCleared && !hasExistingStorage && defaultCustomRulesText) {
                     const parsed = parseRulesText(defaultCustomRulesText);
                     if (parsed.compoundWords.size > 0 || parsed.stopWords.size > 0 || parsed.synonymRules.size > 0) {
                         customCompoundWords = parsed.compoundWords;
@@ -708,6 +716,7 @@ function clearAllRules() {
         customCompoundWords.clear();
         customStopWords.clear();
         customSynonymRules.clear();
+        localStorage.setItem('customRulesCleared', 'true');
         saveSettings();
         renderCompoundWords();
         renderStopWords();
@@ -715,6 +724,21 @@ function clearAllRules() {
         if (rawTextData) {
             processAndRender();
         }
+    }
+}
+
+async function reloadDefaultRules() {
+    try {
+        const cacheBuster = `?_=${Date.now()}`;
+        const resp = await fetch(`data/custom_rules.txt${cacheBuster}`, { cache: 'no-cache' });
+        if (!resp.ok) {
+            alert("data/custom_rules.txt が見つかりませんでした。");
+            return;
+        }
+        const text = await resp.text();
+        openRulesImportProcess(text, 'data/custom_rules.txt');
+    } catch (e) {
+        alert("標準ルールの読み込み中にエラーが発生しました: " + (e.message || e));
     }
 }
 
@@ -729,6 +753,7 @@ function applyParsedRules(parsed, mode) {
         parsed.synonymRules.forEach((v, k) => customSynonymRules.set(k, v));
     }
 
+    localStorage.removeItem('customRulesCleared');
     saveSettings();
     renderCompoundWords();
     renderStopWords();
@@ -834,6 +859,10 @@ function initRulesFileListeners() {
 
     if (downloadTemplateBtn) {
         downloadTemplateBtn.addEventListener('click', downloadRulesTemplate);
+    }
+
+    if (reloadDefaultRulesBtn) {
+        reloadDefaultRulesBtn.addEventListener('click', reloadDefaultRules);
     }
 
     if (clearAllRulesBtn) {
@@ -6702,6 +6731,9 @@ function startApp() {
     initKuromoji();
     updateClusterCountGroupVisibility();
     initCSVModalListeners();
+    if (networkFontSizeRange && networkFontSizeVal) {
+        networkFontSizeVal.innerText = `${networkFontSizeRange.value}px`;
+    }
 }
 
 if (document.readyState === 'loading') {
@@ -6943,7 +6975,7 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
             
             const selectedTheme = document.getElementById('color-theme') ? document.getElementById('color-theme').value : 'default';
             const isDarkTheme = document.documentElement.getAttribute('data-theme') === 'dark';
-            const selectedFont = document.getElementById('font-family') ? document.getElementById('font-family').value : 'sans-serif';
+            const selectedFont = fontSelect ? fontSelect.value : "'BIZ UDP Gothic', sans-serif";
             
             // Build Nodes
             let miniNodes = [{
