@@ -1235,15 +1235,15 @@ const DEGREE_SCALE_GROUPS = [
         ["不満"],
         ["大変不満", "非常に不満", "とても不満", "大いに不満"]
     ],
-    // 評価（良し悪し）尺度
+    // 評価（良し悪し・景気現状判断・動向）尺度
     [
         ["大変良い", "非常に良い", "とても良い", "極めて良い"],
-        ["良い", "よい", "良好", "優良"],
-        ["やや良い", "どちらかといえば良い", "まあ良い"],
-        ["普通", "ふつう"],
-        ["やや悪い", "どちらかといえば悪い", "少し悪い"],
-        ["悪い", "わるい", "不良"],
-        ["大変悪い", "非常に悪い", "とても悪い", "最悪"]
+        ["良い", "よい", "良好", "優良", "良くなっている", "上向き", "改善"],
+        ["やや良い", "どちらかといえば良い", "まあ良い", "やや良くなっている", "やや上向き", "やや改善", "少し良い"],
+        ["普通", "ふつう", "変わらない", "横ばい", "保合", "変化なし", "前年並み", "平年並み", "同水準"],
+        ["やや悪い", "どちらかといえば悪い", "少し悪い", "やや悪くなっている", "やや下向き", "やや悪化"],
+        ["悪い", "わるい", "不良", "悪くなっている", "下向き", "悪化"],
+        ["大変悪い", "非常に悪い", "とても悪い", "最悪", "極めて悪い"]
     ],
     // 同意度・共感度尺度
     [
@@ -1501,34 +1501,58 @@ function openExcelFilterDropdown(colIdx, buttonElem) {
     const sortBar = document.createElement('div');
     sortBar.className = 'excel-filter-sort-bar';
 
-    const isAscActive = csvTableSortCol === colIdx && csvTableSortAsc;
-    const isDescActive = csvTableSortCol === colIdx && !csvTableSortAsc;
+    // この列の現在のソート状態（未ソートの場合はデフォルト昇順）
+    let dropdownSortAsc = (csvTableSortCol === colIdx) ? csvTableSortAsc : true;
 
     const sortAscBtn = document.createElement('button');
     sortAscBtn.type = 'button';
-    sortAscBtn.className = `excel-sort-btn${isAscActive ? ' active' : ''}`;
+    sortAscBtn.className = `excel-sort-btn${(csvTableSortCol === colIdx && csvTableSortAsc) ? ' active' : ''}`;
     sortAscBtn.innerHTML = `<span>↑</span> 昇順で並べ替え`;
-    sortAscBtn.title = `${colName} の値で表を昇順（日付順・数値順・自然順）に並べ替えます`;
-    sortAscBtn.onclick = (e) => {
-        e.stopPropagation();
-        csvTableSortCol = colIdx;
-        csvTableSortAsc = true;
-        closeExcelFilterDropdown();
-        renderCSVDataTable();
-    };
+    sortAscBtn.title = `${colName} の値で表と候補を昇順（日付順・数値順・自然順）に並べ替えます`;
 
     const sortDescBtn = document.createElement('button');
     sortDescBtn.type = 'button';
-    sortDescBtn.className = `excel-sort-btn${isDescActive ? ' active' : ''}`;
+    sortDescBtn.className = `excel-sort-btn${(csvTableSortCol === colIdx && !csvTableSortAsc) ? ' active' : ''}`;
     sortDescBtn.innerHTML = `<span>↓</span> 降順で並べ替え`;
-    sortDescBtn.title = `${colName} の値で表を降順に並べ替えます`;
+    sortDescBtn.title = `${colName} の値で表と候補を降順に並べ替えます`;
+
+    function applyColumnSort(asc) {
+        dropdownSortAsc = asc;
+        csvTableSortCol = colIdx;
+        csvTableSortAsc = asc;
+
+        // ボタンのアクティブ状態を切り替え
+        sortAscBtn.className = `excel-sort-btn${asc ? ' active' : ''}`;
+        sortDescBtn.className = `excel-sort-btn${!asc ? ' active' : ''}`;
+
+        // 候補リスト（valueCounts）自体を昇順/降順で並べ替えて即座に再描画
+        valueCounts.sort((a, b) => {
+            const cmp = compareCSVValues(a[0], b[0]);
+            return asc ? cmp : -cmp;
+        });
+        renderListItems();
+
+        // 背後のデータテーブルも即座に再描画（ソート結果を即座に確認可能）
+        renderCSVDataTable();
+    }
+
+    sortAscBtn.onclick = (e) => {
+        e.stopPropagation();
+        applyColumnSort(true);
+    };
+
     sortDescBtn.onclick = (e) => {
         e.stopPropagation();
-        csvTableSortCol = colIdx;
-        csvTableSortAsc = false;
-        closeExcelFilterDropdown();
-        renderCSVDataTable();
+        applyColumnSort(false);
     };
+
+    // 初期表示時：もし現在この列が降順ソート中なら、候補リストも降順で表示
+    if (csvTableSortCol === colIdx && !csvTableSortAsc) {
+        valueCounts.sort((a, b) => {
+            const cmp = compareCSVValues(a[0], b[0]);
+            return -cmp;
+        });
+    }
 
     sortBar.appendChild(sortAscBtn);
     sortBar.appendChild(sortDescBtn);
