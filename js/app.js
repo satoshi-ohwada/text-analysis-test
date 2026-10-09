@@ -91,6 +91,7 @@ const networkThresholdRange = document.getElementById('network-threshold-range')
 const networkThresholdVal = document.getElementById('network-threshold-val');
 const networkOptionsGroup = document.getElementById('network-options-group');
 const networkMinEdgeCheck = document.getElementById('network-min-edge-check');
+const diagramLabelSizeGroup = document.getElementById('diagram-label-size-group');
 const networkFontSizeRange = document.getElementById('network-font-size-range');
 const networkFontSizeVal = document.getElementById('network-font-size-val');
 const colorTheme = document.getElementById('color-theme');
@@ -2358,7 +2359,7 @@ if (networkThresholdRange) {
 if (networkFontSizeRange) {
     networkFontSizeRange.addEventListener('input', (e) => {
         if (networkFontSizeVal) networkFontSizeVal.innerText = `${e.target.value}px`;
-        if (displayType.value === 'network' && rawTextData) {
+        if (['network', 'pca', 'umap'].includes(displayType.value) && rawTextData) {
             updateWordCloud();
         }
     });
@@ -2439,6 +2440,14 @@ function updateClusterCountGroupVisibility() {
     } else {
         if (networkThresholdGroup) networkThresholdGroup.style.display = 'none';
         if (networkOptionsGroup) networkOptionsGroup.style.display = 'none';
+    }
+
+    if (diagramLabelSizeGroup) {
+        if (displayType && ['network', 'pca', 'umap'].includes(displayType.value)) {
+            diagramLabelSizeGroup.style.display = 'block';
+        } else {
+            diagramLabelSizeGroup.style.display = 'none';
+        }
     }
 
     if (methodDescription && displayType) {
@@ -5235,14 +5244,17 @@ function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThem
         ctx.lineWidth = 1.5 * scaleFactor;
         ctx.stroke();
         
+        const baseFontSize = (networkFontSizeRange && networkFontSizeRange.value) ? parseInt(networkFontSizeRange.value, 10) : 15;
+        const fontSizePx = Math.round(baseFontSize * scaleFactor);
+        
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
-        ctx.font = `bold ${Math.round(11 * scaleFactor)}px ${selectedFont}`;
+        ctx.font = `bold ${fontSizePx}px ${selectedFont}`;
         
         const labelY = py - (radius * scaleFactor + 4 * scaleFactor);
         
         ctx.strokeStyle = isDarkTheme ? '#0B0F19' : '#FFFFFF';
-        ctx.lineWidth = 3.5 * scaleFactor;
+        ctx.lineWidth = Math.max(3, Math.round(baseFontSize * 0.28)) * scaleFactor;
         ctx.lineJoin = 'round';
         ctx.strokeText(p.word, px, labelY);
         
@@ -5689,14 +5701,17 @@ function drawUMAPOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThe
         ctx.lineWidth = 1.5 * scaleFactor;
         ctx.stroke();
         
+        const baseFontSize = (networkFontSizeRange && networkFontSizeRange.value) ? parseInt(networkFontSizeRange.value, 10) : 15;
+        const fontSizePx = Math.round(baseFontSize * scaleFactor);
+        
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
-        ctx.font = `bold ${Math.round(11 * scaleFactor)}px ${selectedFont}`;
+        ctx.font = `bold ${fontSizePx}px ${selectedFont}`;
         
         const labelY = py - (radius * scaleFactor + 4 * scaleFactor);
         
         ctx.strokeStyle = isDarkTheme ? '#0B0F19' : '#FFFFFF';
-        ctx.lineWidth = 3.5 * scaleFactor;
+        ctx.lineWidth = Math.max(3, Math.round(baseFontSize * 0.28)) * scaleFactor;
         ctx.lineJoin = 'round';
         ctx.strokeText(p.word, px, labelY);
         
