@@ -2394,6 +2394,74 @@ if (networkFontSizeRange) {
     });
 }
 
+// Plus / Minus Step Buttons for Sliders (Click and Long-press support)
+function initSliderStepButtons() {
+    const stepButtons = document.querySelectorAll('.slider-step-btn');
+    if (stepButtons.length === 0) return;
+
+    stepButtons.forEach(btn => {
+        const sliderId = btn.getAttribute('data-slider-id');
+        const dir = parseFloat(btn.getAttribute('data-step-dir') || '1');
+        const slider = document.getElementById(sliderId);
+        if (!slider) return;
+
+        function stepSlider() {
+            const min = slider.min !== '' ? parseFloat(slider.min) : 0;
+            const max = slider.max !== '' ? parseFloat(slider.max) : 100;
+            const step = slider.step && slider.step !== 'any' ? parseFloat(slider.step) : 1;
+            let current = parseFloat(slider.value);
+            if (isNaN(current)) current = min;
+
+            const stepDecimals = (step.toString().split('.')[1] || '').length;
+            let nextVal = current + dir * step;
+            nextVal = Math.min(max, Math.max(min, nextVal));
+            nextVal = parseFloat(nextVal.toFixed(stepDecimals));
+
+            if (nextVal !== current) {
+                slider.value = nextVal;
+                slider.dispatchEvent(new Event('input', { bubbles: true }));
+                slider.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+
+        let pressTimer = null;
+        let repeatInterval = null;
+
+        function startPress(e) {
+            if (e.button !== undefined && e.button !== 0) return; // Only primary mouse button
+            e.preventDefault();
+            stepSlider();
+
+            clearTimeout(pressTimer);
+            clearInterval(repeatInterval);
+
+            // Start repeating after 320ms hold, step every 60ms
+            pressTimer = setTimeout(() => {
+                repeatInterval = setInterval(() => {
+                    stepSlider();
+                }, 60);
+            }, 320);
+        }
+
+        function endPress() {
+            clearTimeout(pressTimer);
+            clearInterval(repeatInterval);
+            pressTimer = null;
+            repeatInterval = null;
+        }
+
+        btn.addEventListener('mousedown', startPress);
+        btn.addEventListener('mouseup', endPress);
+        btn.addEventListener('mouseleave', endPress);
+
+        btn.addEventListener('touchstart', startPress, { passive: false });
+        btn.addEventListener('touchend', endPress);
+        btn.addEventListener('touchcancel', endPress);
+    });
+}
+
+initSliderStepButtons();
+
 // Render triggers for filters
 [posNoun, posVerb, posAdj, posAdv, mergeNounsCheckbox, document.getElementById('ranking-method'), networkMinEdgeCheck].forEach(elem => {
     if (!elem) return;
