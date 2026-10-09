@@ -91,6 +91,8 @@ const networkThresholdRange = document.getElementById('network-threshold-range')
 const networkThresholdVal = document.getElementById('network-threshold-val');
 const networkOptionsGroup = document.getElementById('network-options-group');
 const networkMinEdgeCheck = document.getElementById('network-min-edge-check');
+const networkFontSizeRange = document.getElementById('network-font-size-range');
+const networkFontSizeVal = document.getElementById('network-font-size-val');
 const colorTheme = document.getElementById('color-theme');
 const fontSelect = document.getElementById('font-select');
 const shapeCircle = document.getElementById('shape-circle');
@@ -2349,6 +2351,15 @@ if (networkThresholdRange) {
         if (networkThresholdVal) networkThresholdVal.innerText = e.target.value;
         if (displayType.value === 'network' && rawTextData) {
             processAndRender();
+        }
+    });
+}
+
+if (networkFontSizeRange) {
+    networkFontSizeRange.addEventListener('input', (e) => {
+        if (networkFontSizeVal) networkFontSizeVal.innerText = `${e.target.value}px`;
+        if (displayType.value === 'network' && rawTextData) {
+            updateWordCloud();
         }
     });
 }
@@ -4974,14 +4985,16 @@ function drawNetworkOnCanvas(canvas, nodes, edges, selectedTheme, selectedFont, 
         ctx.lineWidth = (selectedTheme === 'pure-bw' ? 2 : 1.5) * scaleFactor;
         ctx.stroke();
         
+        const baseFontSize = (networkFontSizeRange && networkFontSizeRange.value) ? parseInt(networkFontSizeRange.value, 10) : 15;
+        const fontSizePx = Math.round(baseFontSize * scaleFactor);
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
-        ctx.font = `bold ${Math.round(11 * scaleFactor)}px ${selectedFont}`;
+        ctx.font = `bold ${fontSizePx}px ${selectedFont}`;
         
         const labelY = node.y - (node.radius * scaleFactor + 4 * scaleFactor);
         
         ctx.strokeStyle = isDarkTheme ? '#0B0F19' : '#FFFFFF';
-        ctx.lineWidth = 3.5 * scaleFactor;
+        ctx.lineWidth = Math.max(3, Math.round(baseFontSize * 0.28)) * scaleFactor;
         ctx.lineJoin = 'round';
         ctx.strokeText(node.id, node.x, labelY);
         

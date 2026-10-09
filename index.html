@@ -170,9 +170,16 @@
                             <input type="checkbox" id="network-min-edge-check" checked>
                             <span>重要語の孤立防止（最低1本接続）</span>
                         </label>
-                        <p style="font-size: 10.5px; color: var(--text-muted); margin-left: 22px; margin-top: -2px; margin-bottom: 2px; line-height: 1.35;">
+                        <p style="font-size: 10.5px; color: var(--text-muted); margin-left: 22px; margin-top: -2px; margin-bottom: 8px; line-height: 1.35;">
                             頻出語が他の強いペアに押し出されて線が消えるのを防ぎ、最も関係の深い語と点線で繋ぎます。
                         </p>
+                    </div>
+                    <div class="slider-group" style="margin-top: 6px; margin-bottom: 2px;">
+                        <div class="slider-label" style="font-size: 12px; color: var(--text-primary);">
+                            <span>ラベル文字サイズ <small style="color: var(--text-muted); font-size: 10px;">(資料用拡大)</small>:</span>
+                            <span id="network-font-size-val" style="font-weight: 600; font-size: 12px;">15px</span>
+                        </div>
+                        <input type="range" id="network-font-size-range" min="11" max="24" value="15" step="1" class="slider">
                     </div>
                 </div>
 
