@@ -12,9 +12,37 @@ let currentTokenizeTaskId = 0;
 
 // Set for standard stop words (dynamically loaded from stopwords.txt)
 let defaultStopWordsSet = new Set();
+let normalizedDefaultStopWords = new Set();
 
 // Custom Stop Words added on-screen by the user
 let customStopWords = new Set();
+let normalizedCustomStopWords = new Set();
+
+function updateNormalizedStopWords() {
+    normalizedDefaultStopWords = new Set(Array.from(defaultStopWordsSet).map(w => w.normalize('NFKC').toLowerCase()));
+    normalizedCustomStopWords = new Set(Array.from(customStopWords).map(w => w.normalize('NFKC').toLowerCase()));
+}
+
+function isStopWord(word) {
+    if (!word) return true;
+    const w = word.trim();
+    if (!w) return true;
+
+    const wLower = w.toLowerCase();
+    const wNorm = w.normalize('NFKC');
+    const wNormLower = wNorm.toLowerCase();
+
+    if (defaultStopWordsSet.has(w) || defaultStopWordsSet.has(wLower) ||
+        customStopWords.has(w) || customStopWords.has(wLower)) {
+        return true;
+    }
+
+    if (normalizedCustomStopWords.has(wNormLower) || normalizedDefaultStopWords.has(wNormLower)) {
+        return true;
+    }
+
+    return false;
+}
 
 // Network Graph State
 let networkNodes = [];
@@ -190,6 +218,7 @@ function loadSettings() {
         if (storedSynonymRules) {
             customSynonymRules = new Map(JSON.parse(storedSynonymRules));
         }
+        updateNormalizedStopWords();
     } catch (e) {
         console.error("Failed to load settings from localStorage", e);
     }
@@ -234,6 +263,7 @@ async function initKuromoji() {
                 .map(line => line.trim())
                 .filter(line => line.length > 0 && !line.startsWith('#'));
             defaultStopWordsSet = new Set(words);
+            updateNormalizedStopWords();
         } else {
             console.warn("stopwords.txt not found. Running with empty default list.");
         }
@@ -329,6 +359,7 @@ async function initKuromoji() {
 }
 
 function renderStopWords() {
+    updateNormalizedStopWords();
     stopwordsList.innerHTML = '';
     
     if (customStopWords.size === 0) {
@@ -3630,11 +3661,20 @@ function mergeConsecutiveNouns(tokens) {
     let merged = [];
     let i = 0;
     
+    const isPunctuationOrSymbol = (str) => {
+        return /^[\p{P}\p{S}\s]+$/u.test(str);
+    };
+
     const isNounForMerge = (t) => {
         if (!t) return false;
         // Don't merge over user-defined compound words or synonym replaced words (act as boundaries)
         if (t.pos_detail_1 === '複合語' || t.pos_detail_1 === '同義語') return false;
         
+        // Punctuation, symbols, slashes, or brackets must NOT be merged as part of a compound noun
+        if (isPunctuationOrSymbol(t.surface_form) || /[()（）/／\\|~^・]/.test(t.surface_form)) {
+            return false;
+        }
+
         // Include Nouns and Prefixes. Exclude non-independent and pronouns.
         if (t.pos === '名詞' || t.pos === '接頭詞') {
             if (t.pos_detail_1 === '非自立' || t.pos_detail_1 === '代名詞' || t.pos_detail_1 === '数' || t.pos_detail_1 === '接尾') {
@@ -3724,10 +3764,15 @@ function processAndRender() {
             word = word.trim();
             if (!word) return;
 
+            // Strip leading / trailing brackets, slashes, quotes, and symbols if attached
+            word = word.replace(/^[\p{P}\p{S}\s]+|[\p{P}\p{S}\s]+$/gu, '').trim();
+            if (!word) return;
+
             if (word.length === 1 && /^[ぁ-んァ-ヶ]$/.test(word)) return;
-            if (/^[0-9０-９\s\.\,\-\_]+$/.test(word)) return;
-            if (defaultStopWordsSet.has(word) || defaultStopWordsSet.has(word.toLowerCase())) return;
-            if (customStopWords.has(word) || customStopWords.has(word.toLowerCase())) return;
+            // Exclude tokens consisting purely of punctuation, symbols, whitespace, or numbers
+            if (/^[\p{P}\p{S}\s0-9０-９]+$/u.test(word)) return;
+            // Stopword check (exact + lower-case + NFKC normalization)
+            if (isStopWord(word)) return;
 
             counts[word] = (counts[word] || 0) + 1;
             uniqueWordsInLine.add(word);
@@ -3741,9 +3786,9 @@ function processAndRender() {
             .map(t => {
                 const p = t.pos;
                 let w = (p === '動詞' || p === '形容詞' || p === '副詞') && t.basic_form !== '*' ? t.basic_form : t.surface_form;
-                return w.trim();
+                return w.trim().replace(/^[\p{P}\p{S}\s]+|[\p{P}\p{S}\s]+$/gu, '').trim();
             })
-            .filter(w => w && !/^[!-/:-@[-`{-~、。，．・\s\r\n\t]+$/.test(w));
+            .filter(w => w && !/^[\p{P}\p{S}\s]+$/u.test(w) && !isStopWord(w));
         tokenWordsList.push(lineTokens);
 
         const uniqueTokensInLine = new Set(lineTokens);
@@ -6945,10 +6990,11 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
             tokens.forEach(t => {
                 const p = t.pos;
                 let tStr = (p === '動詞' || p === '形容詞' || p === '副詞') && t.basic_form !== '*' ? t.basic_form : t.surface_form;
+                let tClean = tStr.replace(/^[\p{P}\p{S}\s]+|[\p{P}\p{S}\s]+$/gu, '').trim();
                 // Exclude the target word(s) itself, stopwords, and punctuation
-                const isTargetPart = isMultiWord ? queryWords.includes(tStr) : (tStr === word);
-                if (allowedPOS.includes(p) && !isTargetPart && !customStopWords.has(tStr) && !defaultStopWordsSet.has(tStr) && !/[!-/:-@[-`{-~、。，．・]/.test(tStr)) {
-                    uniqueWordsInSentence.add(tStr);
+                const isTargetPart = isMultiWord ? (queryWords.includes(tStr) || queryWords.includes(tClean)) : (tStr === word || tClean === word);
+                if (allowedPOS.includes(p) && tClean && !isTargetPart && !isStopWord(tClean) && !/^[\p{P}\p{S}\s]+$/u.test(tClean)) {
+                    uniqueWordsInSentence.add(tClean);
                 }
             });
             uniqueWordsInSentence.forEach(w => {
