@@ -209,6 +209,17 @@
                     </select>
                 </div>
 
+                <div id="chart-color-mode-group" style="display: none; margin-top: 10px; margin-bottom: 10px;">
+                    <label for="chart-color-mode">棒グラフ配色ルール:</label>
+                    <select id="chart-color-mode" class="select-control">
+                        <option value="gradient" selected>頻度グラデーション（回数順に濃淡）</option>
+                        <option value="single">単色・統一（テーマ代表色）</option>
+                        <option value="pos">品詞別（名詞・動詞・形容詞など）</option>
+                        <option value="cluster">共起グループ・クラスタ別</option>
+                        <option value="random">カラフル（テーマ準拠ランダム）</option>
+                    </select>
+                </div>
+
                 <label for="font-select">フォント:</label>
                 <select id="font-select" class="select-control">
                     <option value="'BIZ UDP Gothic', sans-serif">BIZ UDPゴシック</option>

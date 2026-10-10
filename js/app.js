@@ -2505,8 +2505,10 @@ initSliderStepButtons();
 
 // Settings that only require redrawing/rendering updates (no K-means recalculation)
 const cloudColorModeSelect = document.getElementById('cloud-color-mode');
+const chartColorModeSelect = document.getElementById('chart-color-mode');
 const redrawElements = [colorTheme, fontSelect, shapeCircle, rotateText];
 if (cloudColorModeSelect) redrawElements.push(cloudColorModeSelect);
+if (chartColorModeSelect) redrawElements.push(chartColorModeSelect);
 
 redrawElements.forEach(elem => {
     elem.addEventListener('change', () => {
@@ -2562,6 +2564,16 @@ function updateClusterCountGroupVisibility() {
             cloudColorGroup.style.display = 'none';
         }
     }
+
+    const chartColorGroup = document.getElementById('chart-color-mode-group');
+    if (chartColorGroup) {
+        if (displayType && displayType.value === 'chart') {
+            chartColorGroup.style.display = 'block';
+        } else {
+            chartColorGroup.style.display = 'none';
+        }
+    }
+
     if (displayType && displayType.value === 'network') {
         if (networkThresholdGroup) networkThresholdGroup.style.display = 'none'; // hidden for now as per user request
         if (networkOptionsGroup) networkOptionsGroup.style.display = 'block';
@@ -3729,6 +3741,7 @@ function processAndRender() {
     if (posAdv.checked) allowedPOS.push('副詞');
 
     const counts = {};
+    const wordPosMap = {};
     const docFreq = {};
     const tokenDocFreq = {};
     const coocCounts = {};
@@ -3775,6 +3788,9 @@ function processAndRender() {
             if (isStopWord(word)) return;
 
             counts[word] = (counts[word] || 0) + 1;
+            if (!wordPosMap[word]) {
+                wordPosMap[word] = pos;
+            }
             uniqueWordsInLine.add(word);
             lineWords.push(word);
         });
@@ -3823,7 +3839,7 @@ function processAndRender() {
             const df = docFreq[text] || 1;
             const idf = Math.log(opinionLinesCount / df) + 1;
             const tfidf = count * idf;
-            return { text, count, tfidf };
+            return { text, count, tfidf, pos: wordPosMap[text] || '名詞' };
         });
 
     if (rankingMethod === 'tfidf') {
@@ -4868,8 +4884,21 @@ function getColorScheme(theme, isDarkTheme = false) {
     };
 }
 
+// Helper to convert hex color to rgba string
+function hexToRgba(hex, alpha = 1) {
+    let cleanHex = hex.replace('#', '');
+    if (cleanHex.length === 3) {
+        cleanHex = cleanHex.split('').map(c => c + c).join('');
+    }
+    const num = parseInt(cleanHex, 16);
+    const r = (num >> 16) & 255;
+    const g = (num >> 8) & 255;
+    const b = num & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 // Helper to draw the bar chart on any canvas
-function drawBarChartOnCanvas(canvas, list, rankingMethod, selectedTheme, selectedFont, isDarkTheme) {
+function drawBarChartOnCanvas(canvas, list, rankingMethod, selectedTheme, selectedFont, isDarkTheme, barColorMode = null) {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
@@ -4878,8 +4907,11 @@ function drawBarChartOnCanvas(canvas, list, rankingMethod, selectedTheme, select
     
     if (list.length === 0) return;
     
+    const colorMode = barColorMode || (document.getElementById('chart-color-mode') ? document.getElementById('chart-color-mode').value : 'gradient');
+    
     const getValue = item => rankingMethod === 'tfidf' ? item.tfidf : item.count;
     const maxVal = Math.max(...list.map(getValue), 0.00001);
+    const minVal = Math.min(...list.map(getValue), 0);
     
     const scaleFactor = canvas.width / 1024;
     
@@ -4893,12 +4925,80 @@ function drawBarChartOnCanvas(canvas, list, rankingMethod, selectedTheme, select
     const barHeight = Math.max(12 * scaleFactor, Math.min(24 * scaleFactor, rowHeight * 0.6));
     
     const barWidthArea = canvas.width - leftMargin - rightMargin;
-    const colorGenerator = getColorScheme(selectedTheme, isDarkTheme);
+    const defaultColorGenerator = getColorScheme(selectedTheme, isDarkTheme);
+
+    // Theme primary color (for single color and gradient base)
+    const themePrimaryColors = {
+        'aurora-light': '#2563EB',
+        'cool-light': '#0284C7',
+        'warm-light': '#DC2626',
+        'pastel-light': '#2563EB',
+        'pure-bw': '#1F2937',
+        'aurora-dark': '#3B82F6',
+        'monochrome-dark': '#E5E7EB'
+    };
+    const primaryHex = themePrimaryColors[selectedTheme] || (isDarkTheme ? '#3B82F6' : '#2563EB');
+
+    // POS palette (soft, distinct semantic tones)
+    const posColorsLight = {
+        '名詞': '#2563EB',   // ブルー
+        '動詞': '#059669',   // エメラルドグリーン
+        '形容詞': '#D97706', // アンバー
+        '副詞': '#7C3AED',   // パープル
+        'その他': '#6B7280'  // グレー
+    };
+    const posColorsDark = {
+        '名詞': '#60A5FA',
+        '動詞': '#34D399',
+        '形容詞': '#FBBF24',
+        '副詞': '#A78BFA',
+        'その他': '#9CA3AF'
+    };
+    const posPalette = isDarkTheme ? posColorsDark : posColorsLight;
+
+    // Build word -> community index map if network nodes exist
+    const communityMap = new Map();
+    if (Array.isArray(networkNodes)) {
+        networkNodes.forEach(node => {
+            if (node && node.id != null) {
+                communityMap.set(node.id, node.communityIndex ?? 0);
+            }
+        });
+    }
     
     list.forEach((item, index) => {
         const val = getValue(item);
         const barWidth = maxVal > 0 ? (val / maxVal) * barWidthArea : 0;
-        const color = colorGenerator(item.text || index);
+        
+        let color = '#2563EB';
+        if (colorMode === 'gradient') {
+            // ① 出現頻度／スコアに応じた濃淡グラデーション
+            const ratio = maxVal > minVal ? (val - minVal) / (maxVal - minVal) : 1;
+            const alpha = 0.35 + ratio * 0.65; // 最低35%〜最大100%の透過度
+            color = hexToRgba(primaryHex, alpha);
+        } else if (colorMode === 'single') {
+            // ② 単色・統一カラー
+            color = primaryHex;
+        } else if (colorMode === 'pos') {
+            // ③ 品詞別カラー
+            const pos = item.pos || '名詞';
+            color = posPalette[pos] || posPalette['その他'];
+        } else if (colorMode === 'cluster') {
+            // ④ クラスタ・共起グループ別
+            if (communityMap.has(item.text)) {
+                const commIdx = communityMap.get(item.text);
+                color = getNetworkNodeColor(selectedTheme, commIdx, isDarkTheme);
+            } else if (selectedTheme === 'topic-lda' && currentLdaResult && currentLdaResult.wordTopics[item.text]) {
+                const topicInfo = currentLdaResult.wordTopics[item.text];
+                color = isDarkTheme ? topicInfo.darkColor : topicInfo.lightColor;
+            } else {
+                // 共起ネットワークに載っていない単語は淡いグレーまたは標準色
+                color = isDarkTheme ? '#4B5563' : '#9CA3AF';
+            }
+        } else {
+            // ⑤ ランダム（従来のテーマ準拠）
+            color = defaultColorGenerator(item.text || index);
+        }
         
         const y = topMargin + index * rowHeight;
         
