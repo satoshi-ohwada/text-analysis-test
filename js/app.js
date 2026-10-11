@@ -69,8 +69,8 @@ let umapOptimalK = 3;
 let umapUserK = 3;
 let umapUserManual = false;
 
-// Cluster Analysis Method State ('kmeans' or 'dbscan')
-let clusterMethod = 'kmeans'; // 'kmeans', 'dbscan'
+// Cluster Analysis Method State ('kmeans', 'dbscan', or 'hdbscan')
+let clusterMethod = 'kmeans'; // 'kmeans', 'dbscan', 'hdbscan'
 let pcaDbscanEps = null;
 let pcaDbscanMinPts = 3;
 let pcaDbscanManual = false;
@@ -82,6 +82,17 @@ let umapDbscanMinPts = 3;
 let umapDbscanManual = false;
 let umapDbscanOptimalEps = null;
 let umapDbscanStats = { numClusters: 0, numNoise: 0 };
+
+// HDBSCAN State
+let pcaHdbscanMinClusterSize = 3;
+let pcaHdbscanMinSamples = 3;
+let pcaHdbscanManual = false;
+let pcaHdbscanStats = { numClusters: 0, numNoise: 0 };
+
+let umapHdbscanMinClusterSize = 3;
+let umapHdbscanMinSamples = 3;
+let umapHdbscanManual = false;
+let umapHdbscanStats = { numClusters: 0, numNoise: 0 };
 
 // LDA Topic Model State
 let currentLdaResult = null;
@@ -155,6 +166,13 @@ const dbscanMinPtsInput = document.getElementById('dbscan-min-pts');
 const dbscanMinPtsVal = document.getElementById('dbscan-min-pts-val');
 const btnAutoDbscanEps = document.getElementById('btn-auto-dbscan-eps');
 const dbscanResultSummary = document.getElementById('dbscan-result-summary');
+const hdbscanControlsPanel = document.getElementById('hdbscan-controls-panel');
+const hdbscanMinClusterSizeInput = document.getElementById('hdbscan-min-cluster-size');
+const hdbscanMinClusterSizeVal = document.getElementById('hdbscan-min-cluster-size-val');
+const hdbscanMinSamplesInput = document.getElementById('hdbscan-min-samples');
+const hdbscanMinSamplesVal = document.getElementById('hdbscan-min-samples-val');
+const btnAutoHdbscan = document.getElementById('btn-auto-hdbscan');
+const hdbscanResultSummary = document.getElementById('hdbscan-result-summary');
 
 // Compound Words Elements
 const newCompoundWordInput = document.getElementById('new-compound-word');
@@ -1031,10 +1049,17 @@ function loadTextAndTokenize(text) {
     pcaDbscanManual = false;
     umapDbscanEps = null;
     umapDbscanManual = false;
+    pcaHdbscanMinClusterSize = 3;
+    pcaHdbscanMinSamples = 3;
+    pcaHdbscanManual = false;
+    umapHdbscanMinClusterSize = 3;
+    umapHdbscanMinSamples = 3;
+    umapHdbscanManual = false;
     clusterMethod = 'kmeans';
     if (clusterMethodSelect) clusterMethodSelect.value = 'kmeans';
     if (kmeansControlsPanel) kmeansControlsPanel.style.display = 'block';
     if (dbscanControlsPanel) dbscanControlsPanel.style.display = 'none';
+    if (hdbscanControlsPanel) hdbscanControlsPanel.style.display = 'none';
     const lines = rawTextData.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     opinionLinesCount = lines.length;
 
@@ -2554,14 +2579,21 @@ function syncClusterUIForActiveView() {
     if (clusterMethodSelect) {
         clusterMethodSelect.value = clusterMethod;
     }
-    if (kmeansControlsPanel && dbscanControlsPanel) {
+    if (kmeansControlsPanel && dbscanControlsPanel && hdbscanControlsPanel) {
         if (clusterMethod === 'dbscan') {
             kmeansControlsPanel.style.display = 'none';
             dbscanControlsPanel.style.display = 'block';
+            hdbscanControlsPanel.style.display = 'none';
             syncDBSCANUIForActiveView();
+        } else if (clusterMethod === 'hdbscan') {
+            kmeansControlsPanel.style.display = 'none';
+            dbscanControlsPanel.style.display = 'none';
+            hdbscanControlsPanel.style.display = 'block';
+            syncHDBSCANUIForActiveView();
         } else {
             kmeansControlsPanel.style.display = 'block';
             dbscanControlsPanel.style.display = 'none';
+            hdbscanControlsPanel.style.display = 'none';
         }
     }
 
@@ -2691,25 +2723,25 @@ function updateClusterCountGroupVisibility() {
                 <div class="tips-title">📌 読み方のポイント</div>
                 <ul class="tips-list">
                     <li><strong>近くにある語</strong> = 似た文脈・同じ話題で使われる語</li>
-                    <li><strong>同じ色の塊</strong> = K平均法で自動分類されたテーマのまとまり（クラスター）</li>
+                    <li><strong>同じ色の塊</strong> = クラスター分析（K平均法・DBSCAN・HDBSCAN）で自動分類されたテーマのまとまり</li>
                     <li><strong>寄与率の合計</strong>はこの図がデータ全体の情報をどの程度表せているかの目安です（テキスト分析では数％〜20％程度と低めに出るのが一般的です）</li>
                     <li><strong>遠く離れた語</strong> = 他の語とは全く異なる文脈で使われる語</li>
                 </ul>
-                <div class="tips-note">💡 「クラスター数」を変えるとグループ分けが変わります。共起ネットワークのグループと見比べると、より深い洞察が得られます。</div>
+                <div class="tips-note">💡 「クラスター分析手法」でK平均法・DBSCAN・HDBSCANを切り替えて分析できます。共起ネットワークのグループと見比べると、より深い洞察が得られます。</div>
             </div>`;
         } else if (type === 'umap') {
             descHtml = `
             <div class="method-title"><span class="method-icon">🌌</span>非線形次元削減（UMAP散布図）</div>
             <div class="method-purpose">高次元の共起関係を非線形に圧縮し、類似した文脈の単語をギュッと集め、異なるテーマのまとまり（クラスター）を綺麗に分離して可視化します。</div>
             <div class="reading-tips">
-                <div class="tips-title">📌 読み方のポイント</div>
+            <div class="tips-title">📌 読み方のポイント</div>
                 <ul class="tips-list">
                     <li><strong>ぎゅっと集まった塊</strong> = 非常に強く結びついた具体的なテーマ（文脈のまとまり）</li>
                     <li><strong>PCAとの違い</strong> = PCAが大まかな全体方向（分散）を見るのに対し、UMAPは「局所的な近さ」をより強力に強調し、クラスタ間の隙間を明確にします</li>
-                    <li><strong>同じ色の塊</strong> = K平均法で自動分類されたクラスター（K=2〜8）</li>
+                    <li><strong>同じ色の塊</strong> = クラスター分析（K平均法・DBSCAN・HDBSCAN）で自動分類されたクラスター</li>
                     <li><strong>単語をクリック</strong>するとKWIC（実際の用例）を確認できます</li>
                 </ul>
-                <div class="tips-note">💡 「クラスター数」を変更するとグループ分けを調整できます。「再計算」ボタンで配置の微調整も可能です。</div>
+                <div class="tips-note">💡 「クラスター分析手法」でK平均法・DBSCAN・HDBSCANを切り替えられます。「再計算」ボタンで配置の微調整も可能です。</div>
             </div>`;
         } else if (type === 'topic-lda') {
             descHtml = `
@@ -2775,6 +2807,22 @@ function updateClusterAssignments(k = null, targetMode = null) {
             umapDbscanStats = { numClusters: dbRes.numClusters, numNoise: dbRes.numNoise };
         }
         updateDBSCANSummaryUI();
+    } else if (clusterMethod === 'hdbscan') {
+        if (isPca) {
+            const minClSz = pcaHdbscanMinClusterSize || 3;
+            const minSamp = pcaHdbscanMinSamples || 3;
+            const hdbRes = runHDBSCAN(rawPcaPoints, minClSz, minSamp);
+            pcaPoints = rawPcaPoints.map((pt, i) => ({ ...pt, cluster: hdbRes.labels[i] }));
+            pcaHdbscanStats = { numClusters: hdbRes.numClusters, numNoise: hdbRes.numNoise };
+        }
+        if (isUmap) {
+            const minClSz = umapHdbscanMinClusterSize || 3;
+            const minSamp = umapHdbscanMinSamples || 3;
+            const hdbRes = runHDBSCAN(rawUmapPoints, minClSz, minSamp);
+            umapPoints = rawUmapPoints.map((pt, i) => ({ ...pt, cluster: hdbRes.labels[i] }));
+            umapHdbscanStats = { numClusters: hdbRes.numClusters, numNoise: hdbRes.numNoise };
+        }
+        updateHDBSCANSummaryUI();
     } else {
         const effPcaK = (targetMode === 'pca' && k) ? k : ((pcaUserManual && pcaUserK) ? pcaUserK : (k || parseInt(clusterCount?.value) || 3));
         const effUmapK = (targetMode === 'umap' && k) ? k : ((umapUserManual && umapUserK) ? umapUserK : (k || parseInt(clusterCount?.value) || 3));
@@ -2834,17 +2882,24 @@ if (btnClusterReset) {
     });
 }
 
-// DBSCAN Control Listeners
+// Cluster Method Selection & Control Listeners
 if (clusterMethodSelect) {
     clusterMethodSelect.addEventListener('change', (e) => {
         clusterMethod = e.target.value;
         if (clusterMethod === 'dbscan') {
             if (kmeansControlsPanel) kmeansControlsPanel.style.display = 'none';
             if (dbscanControlsPanel) dbscanControlsPanel.style.display = 'block';
+            if (hdbscanControlsPanel) hdbscanControlsPanel.style.display = 'none';
             autoConfigureDBSCAN(true);
+        } else if (clusterMethod === 'hdbscan') {
+            if (kmeansControlsPanel) kmeansControlsPanel.style.display = 'none';
+            if (dbscanControlsPanel) dbscanControlsPanel.style.display = 'none';
+            if (hdbscanControlsPanel) hdbscanControlsPanel.style.display = 'block';
+            autoConfigureHDBSCAN(true);
         } else {
             if (kmeansControlsPanel) kmeansControlsPanel.style.display = 'block';
             if (dbscanControlsPanel) dbscanControlsPanel.style.display = 'none';
+            if (hdbscanControlsPanel) hdbscanControlsPanel.style.display = 'none';
             syncClusterUIForActiveView();
             updateClusterAssignments();
             updateWordCloud();
@@ -2852,6 +2907,7 @@ if (clusterMethodSelect) {
     });
 }
 
+// DBSCAN Control Listeners
 if (dbscanEpsInput) {
     const handleEpsChange = (e) => {
         const val = parseFloat(e.target.value);
@@ -2900,6 +2956,55 @@ if (dbscanMinPtsInput) {
 if (btnAutoDbscanEps) {
     btnAutoDbscanEps.addEventListener('click', () => {
         autoConfigureDBSCAN(true);
+    });
+}
+
+// HDBSCAN Control Listeners
+if (hdbscanMinClusterSizeInput) {
+    const handleMinClusterSizeChange = (e) => {
+        const val = parseInt(e.target.value);
+        const mode = displayType ? displayType.value : '';
+        if (mode === 'umap') {
+            umapHdbscanMinClusterSize = val;
+            umapHdbscanManual = true;
+        } else {
+            pcaHdbscanMinClusterSize = val;
+            pcaHdbscanManual = true;
+        }
+        if (hdbscanMinClusterSizeVal) hdbscanMinClusterSizeVal.textContent = val;
+        if (clusterMethod === 'hdbscan' && rawTextData) {
+            updateClusterAssignments(null, mode);
+            updateWordCloud();
+        }
+    };
+    hdbscanMinClusterSizeInput.addEventListener('input', handleMinClusterSizeChange);
+    hdbscanMinClusterSizeInput.addEventListener('change', handleMinClusterSizeChange);
+}
+
+if (hdbscanMinSamplesInput) {
+    const handleMinSamplesChange = (e) => {
+        const val = parseInt(e.target.value);
+        const mode = displayType ? displayType.value : '';
+        if (mode === 'umap') {
+            umapHdbscanMinSamples = val;
+            umapHdbscanManual = true;
+        } else {
+            pcaHdbscanMinSamples = val;
+            pcaHdbscanManual = true;
+        }
+        if (hdbscanMinSamplesVal) hdbscanMinSamplesVal.textContent = val;
+        if (clusterMethod === 'hdbscan' && rawTextData) {
+            updateClusterAssignments(null, mode);
+            updateWordCloud();
+        }
+    };
+    hdbscanMinSamplesInput.addEventListener('input', handleMinSamplesChange);
+    hdbscanMinSamplesInput.addEventListener('change', handleMinSamplesChange);
+}
+
+if (btnAutoHdbscan) {
+    btnAutoHdbscan.addEventListener('click', () => {
+        autoConfigureHDBSCAN(true);
     });
 }
 
@@ -3517,6 +3622,342 @@ function autoConfigureDBSCAN(applyImmediately = true) {
     syncDBSCANUIForActiveView();
     
     if (applyImmediately && clusterMethod === 'dbscan') {
+        updateClusterAssignments(null, mode);
+        updateWordCloud();
+    }
+}
+
+// HDBSCAN (Hierarchical Density-Based Spatial Clustering of Applications with Noise)
+function runHDBSCAN(points, minClusterSize = 3, minSamples = 3) {
+    const n = points.length;
+    if (n === 0) return { labels: [], numClusters: 0, numNoise: 0, probabilities: [] };
+    if (n < minClusterSize) {
+        return {
+            labels: new Array(n).fill(-1),
+            numClusters: 0,
+            numNoise: n,
+            probabilities: new Array(n).fill(0)
+        };
+    }
+
+    // 1. Distance matrix
+    const distMatrix = Array.from({ length: n }, () => new Float64Array(n));
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+            const d = euclideanDistance(points[i], points[j]);
+            distMatrix[i][j] = d;
+            distMatrix[j][i] = d;
+        }
+    }
+
+    // 2. Core distances: distance to minSamples-th nearest neighbor
+    const k = Math.max(1, Math.min(minSamples, n - 1));
+    const coreDistances = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+        const dList = [];
+        for (let j = 0; j < n; j++) {
+            if (i !== j) dList.push(distMatrix[i][j]);
+        }
+        dList.sort((a, b) => a - b);
+        coreDistances[i] = dList[Math.min(k - 1, dList.length - 1)] || 0;
+    }
+
+    // 3. Mutual Reachability Distance & MST (Prim's Algorithm)
+    const inMST = new Uint8Array(n);
+    const minDist = new Float64Array(n).fill(Infinity);
+    const parent = new Int32Array(n).fill(-1);
+
+    minDist[0] = 0;
+    const mstEdges = [];
+
+    for (let step = 0; step < n; step++) {
+        let u = -1;
+        let minW = Infinity;
+        for (let i = 0; i < n; i++) {
+            if (!inMST[i] && minDist[i] < minW) {
+                minW = minDist[i];
+                u = i;
+            }
+        }
+        if (u === -1) break;
+        inMST[u] = 1;
+        if (parent[u] !== -1) {
+            mstEdges.push({ u: parent[u], v: u, weight: minW });
+        }
+
+        for (let v = 0; v < n; v++) {
+            if (!inMST[v]) {
+                const mreach = Math.max(coreDistances[u], coreDistances[v], distMatrix[u][v]);
+                if (mreach < minDist[v]) {
+                    minDist[v] = mreach;
+                    parent[v] = u;
+                }
+            }
+        }
+    }
+
+    // 4. Sort MST edges by weight ascending
+    mstEdges.sort((a, b) => a.weight - b.weight);
+
+    // 5. Build Single Linkage Hierarchy using Union-Find
+    class DSU {
+        constructor(size) {
+            this.parent = new Int32Array(size);
+            for (let i = 0; i < size; i++) this.parent[i] = i;
+        }
+        find(i) {
+            let root = i;
+            while (root !== this.parent[root]) root = this.parent[root];
+            let curr = i;
+            while (curr !== root) {
+                const nxt = this.parent[curr];
+                this.parent[curr] = root;
+                curr = nxt;
+            }
+            return root;
+        }
+    }
+
+    const dsu = new DSU(2 * n);
+    const slTree = new Array(2 * n);
+    for (let i = 0; i < n; i++) {
+        slTree[i] = { id: i, left: null, right: null, weight: 0, size: 1, points: [i] };
+    }
+
+    let nextNodeId = n;
+    for (const edge of mstEdges) {
+        const rootU = dsu.find(edge.u);
+        const rootV = dsu.find(edge.v);
+        if (rootU !== rootV) {
+            const newNodeId = nextNodeId++;
+            const nodeU = slTree[rootU];
+            const nodeV = slTree[rootV];
+            const combinedPoints = nodeU.points.concat(nodeV.points);
+
+            slTree[newNodeId] = {
+                id: newNodeId,
+                left: nodeU,
+                right: nodeV,
+                weight: edge.weight,
+                size: combinedPoints.length,
+                points: combinedPoints
+            };
+
+            dsu.parent[rootU] = newNodeId;
+            dsu.parent[rootV] = newNodeId;
+        }
+    }
+
+    const slRoot = slTree[nextNodeId - 1];
+
+    // 6. Condense Cluster Tree
+    let nextClusterId = 0;
+    const condensedNodes = [];
+
+    function createCondensedNode(birthLambda, initialPoints) {
+        const cNode = {
+            id: nextClusterId++,
+            birth: birthLambda,
+            death: birthLambda,
+            points: new Set(initialPoints),
+            children: [],
+            stability: 0,
+            fallout: [] // { point, lambda }
+        };
+        condensedNodes.push(cNode);
+        return cNode;
+    }
+
+    const rootCluster = createCondensedNode(0, slRoot.points);
+
+    function condense(slNode, activeCluster) {
+        if (!slNode || slNode.size === 1) return;
+
+        const left = slNode.left;
+        const right = slNode.right;
+        const w = slNode.weight;
+        const lambda = w > 1e-12 ? (1.0 / w) : 1e9;
+
+        const leftLarge = left.size >= minClusterSize;
+        const rightLarge = right.size >= minClusterSize;
+
+        if (leftLarge && rightLarge) {
+            // True split
+            activeCluster.death = lambda;
+            const leftCluster = createCondensedNode(lambda, left.points);
+            const rightCluster = createCondensedNode(lambda, right.points);
+            activeCluster.children.push(leftCluster, rightCluster);
+
+            condense(left, leftCluster);
+            condense(right, rightCluster);
+        } else if (leftLarge && !rightLarge) {
+            // Right falls out of activeCluster
+            for (const p of right.points) {
+                activeCluster.fallout.push({ point: p, lambda });
+            }
+            condense(left, activeCluster);
+        } else if (!leftLarge && rightLarge) {
+            // Left falls out of activeCluster
+            for (const p of left.points) {
+                activeCluster.fallout.push({ point: p, lambda });
+            }
+            condense(right, activeCluster);
+        } else {
+            // Both fall out, activeCluster dies
+            activeCluster.death = lambda;
+            for (const p of left.points) {
+                activeCluster.fallout.push({ point: p, lambda });
+            }
+            for (const p of right.points) {
+                activeCluster.fallout.push({ point: p, lambda });
+            }
+        }
+    }
+
+    condense(slRoot, rootCluster);
+
+    // 7. Calculate Stability for each Condensed Node
+    for (const cNode of condensedNodes) {
+        let stab = 0;
+        for (const f of cNode.fallout) {
+            stab += (f.lambda - cNode.birth);
+        }
+        if (cNode.children.length > 0) {
+            let childPointsCount = 0;
+            for (const child of cNode.children) {
+                childPointsCount += child.points.size;
+            }
+            stab += childPointsCount * (cNode.death - cNode.birth);
+        }
+        cNode.stability = stab;
+    }
+
+    // 8. Cluster Selection (Excess of Mass - EOM)
+    const selectedClusters = new Set();
+    const subtreeStability = new Map();
+
+    function computeSelection(cNode) {
+        if (cNode.children.length === 0) {
+            subtreeStability.set(cNode.id, cNode.stability);
+            return;
+        }
+
+        let childSum = 0;
+        for (const child of cNode.children) {
+            computeSelection(child);
+            childSum += subtreeStability.get(child.id);
+        }
+
+        if (cNode.stability > childSum) {
+            subtreeStability.set(cNode.id, cNode.stability);
+        } else {
+            subtreeStability.set(cNode.id, childSum);
+        }
+    }
+
+    computeSelection(rootCluster);
+
+    function selectNodes(cNode) {
+        if (cNode.children.length === 0) {
+            selectedClusters.add(cNode.id);
+            return;
+        }
+
+        const maxStab = subtreeStability.get(cNode.id);
+        if (Math.abs(cNode.stability - maxStab) < 1e-9 && cNode.stability > 0) {
+            selectedClusters.add(cNode.id);
+        } else {
+            for (const child of cNode.children) {
+                selectNodes(child);
+            }
+        }
+    }
+
+    selectNodes(rootCluster);
+
+    // 9. Assign cluster labels
+    const labels = new Array(n).fill(-1);
+    const probabilities = new Float64Array(n).fill(0);
+
+    let clusterIdx = 0;
+    const sortedSelected = Array.from(selectedClusters)
+        .map(id => condensedNodes[id])
+        .sort((a, b) => b.points.size - a.points.size);
+
+    for (const cNode of sortedSelected) {
+        const cId = clusterIdx++;
+        const maxLambda = Math.max(cNode.death, ...cNode.fallout.map(f => f.lambda), cNode.birth + 1e-6);
+        const lambdaRange = maxLambda - cNode.birth;
+
+        for (const p of cNode.points) {
+            if (labels[p] === -1) {
+                labels[p] = cId;
+                const f = cNode.fallout.find(item => item.point === p);
+                const pLambda = f ? f.lambda : maxLambda;
+                const prob = lambdaRange > 1e-9 ? Math.min(1.0, Math.max(0.1, (pLambda - cNode.birth) / lambdaRange)) : 1.0;
+                probabilities[p] = prob;
+            }
+        }
+    }
+
+    const numClusters = clusterIdx;
+    const numNoise = labels.filter(l => l === -1).length;
+
+    return { labels, numClusters, numNoise, probabilities: Array.from(probabilities) };
+}
+
+function updateHDBSCANSummaryUI() {
+    if (!hdbscanResultSummary) return;
+    const mode = displayType ? displayType.value : '';
+    const stats = mode === 'umap' ? umapHdbscanStats : pcaHdbscanStats;
+    const { numClusters, numNoise } = stats || { numClusters: 0, numNoise: 0 };
+    hdbscanResultSummary.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>検出クラスタ: <strong style="color: #059669;">${numClusters}個</strong></span>
+            <span>外れ値 (ノイズ): <strong style="color: ${numNoise > 0 ? '#dc2626' : '#16a34a'};">${numNoise}件</strong></span>
+        </div>
+    `;
+}
+
+function syncHDBSCANUIForActiveView() {
+    const mode = displayType ? displayType.value : '';
+    const isUmap = mode === 'umap';
+    const currentMinClusterSize = isUmap ? umapHdbscanMinClusterSize : pcaHdbscanMinClusterSize;
+    const currentMinSamples = isUmap ? umapHdbscanMinSamples : pcaHdbscanMinSamples;
+
+    if (hdbscanMinClusterSizeInput) {
+        hdbscanMinClusterSizeInput.value = currentMinClusterSize;
+    }
+    if (hdbscanMinClusterSizeVal) {
+        hdbscanMinClusterSizeVal.textContent = currentMinClusterSize;
+    }
+    if (hdbscanMinSamplesInput) {
+        hdbscanMinSamplesInput.value = currentMinSamples;
+    }
+    if (hdbscanMinSamplesVal) {
+        hdbscanMinSamplesVal.textContent = currentMinSamples;
+    }
+
+    updateHDBSCANSummaryUI();
+}
+
+function autoConfigureHDBSCAN(applyImmediately = true) {
+    const mode = displayType ? displayType.value : '';
+    const isUmap = mode === 'umap';
+    
+    if (isUmap) {
+        umapHdbscanMinClusterSize = 3;
+        umapHdbscanMinSamples = 3;
+        umapHdbscanManual = false;
+    } else {
+        pcaHdbscanMinClusterSize = 3;
+        pcaHdbscanMinSamples = 3;
+        pcaHdbscanManual = false;
+    }
+    
+    syncHDBSCANUIForActiveView();
+    
+    if (applyImmediately && clusterMethod === 'hdbscan') {
         updateClusterAssignments(null, mode);
         updateWordCloud();
     }
@@ -4545,6 +4986,10 @@ function processAndRender() {
             const dbRes = runDBSCAN(rawPoints, pcaDbscanEps, pcaDbscanMinPts);
             pcaPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: dbRes.labels[i] }));
             pcaDbscanStats = { numClusters: dbRes.numClusters, numNoise: dbRes.numNoise };
+        } else if (clusterMethod === 'hdbscan') {
+            const hdbRes = runHDBSCAN(rawPoints, pcaHdbscanMinClusterSize, pcaHdbscanMinSamples);
+            pcaPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: hdbRes.labels[i] }));
+            pcaHdbscanStats = { numClusters: hdbRes.numClusters, numNoise: hdbRes.numNoise };
         } else if (activePcaK === pcaOptimalK && pcaOpt.assignments) {
             pcaPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: pcaOpt.assignments[i] }));
         } else {
@@ -5634,7 +6079,7 @@ function drawNetworkOnCanvas(canvas, nodes, edges, selectedTheme, selectedFont, 
 }
 
 // Helper to draw PCA Legend on any canvas
-function drawPCALegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, maxCount, k, selectedTheme, selectedFont, isDbscan = false, dbStats = null) {
+function drawPCALegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, maxCount, k, selectedTheme, selectedFont, isDbscanOrMethod = false, dbStats = null) {
     const scaleFactor = canvasWidth / 1024;
     const x = 20 * scaleFactor;
     const y = canvasHeight - 75 * scaleFactor;
@@ -5645,7 +6090,10 @@ function drawPCALegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, ma
     ctx.strokeStyle = isDarkTheme ? 'rgba(15, 23, 42, 0.08)' : 'rgba(0, 0, 0, 0.08)';
     ctx.lineWidth = 1 * scaleFactor;
     
-    const hasNoise = isDbscan && dbStats && dbStats.numNoise > 0;
+    const isMethodHdbscan = (isDbscanOrMethod === 'hdbscan');
+    const isMethodDbscan = (isDbscanOrMethod === 'dbscan' || isDbscanOrMethod === true);
+    const isDensityBased = isMethodDbscan || isMethodHdbscan;
+    const hasNoise = isDensityBased && dbStats && dbStats.numNoise > 0;
     const w = (hasNoise ? 245 : 210) * scaleFactor;
     const h = 56 * scaleFactor;
     const r = 4 * scaleFactor;
@@ -5694,9 +6142,10 @@ function drawPCALegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, ma
     const dY = y + 42 * scaleFactor;
     const spacing = 10 * scaleFactor;
 
-    if (isDbscan) {
+    if (isDensityBased) {
         const numClust = dbStats ? dbStats.numClusters : 0;
-        const legendLabel = numClust > 0 ? `色:DBSCAN (C1-C${Math.min(numClust, 8)})` : "DBSCAN (0クラスタ)";
+        const methodName = isMethodHdbscan ? 'HDBSCAN' : 'DBSCAN';
+        const legendLabel = numClust > 0 ? `色:${methodName} (C1-C${Math.min(numClust, 8)})` : `${methodName} (0クラスタ)`;
         ctx.fillText(legendLabel, x + 10 * scaleFactor, dY - 4 * scaleFactor);
         
         const startDotX = x + (numClust > 0 ? 115 : 120) * scaleFactor;
@@ -5822,10 +6271,10 @@ function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThem
     const minCount = Math.min(...counts);
     const maxCount = Math.max(...counts);
     
-    const isDbscan = (clusterMethod === 'dbscan');
+    const isDensityBased = (clusterMethod === 'dbscan' || clusterMethod === 'hdbscan');
     const validClusters = points.map(p => p.cluster).filter(c => c >= 0);
     const maxClusterId = validClusters.length > 0 ? Math.max(...validClusters) : -1;
-    const numClusters = isDbscan 
+    const numClusters = isDensityBased 
         ? (maxClusterId + 1) 
         : ((pcaUserManual && pcaUserK) ? pcaUserK : (pcaOptimalK || parseInt(clusterCount?.value) || 3));
     const clusterPoints = Array.from({ length: Math.max(1, numClusters) }, () => []);
@@ -5924,7 +6373,8 @@ function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThem
         ctx.fillText(p.word, px, labelY);
     });
 
-    drawPCALegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, numClusters, selectedTheme, selectedFont, isDbscan, pcaDbscanStats);
+    const activePcaStats = clusterMethod === 'hdbscan' ? pcaHdbscanStats : pcaDbscanStats;
+    drawPCALegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, numClusters, selectedTheme, selectedFont, clusterMethod, activePcaStats);
 }
 
 // ==========================================
@@ -6144,6 +6594,10 @@ function runUMAPAnalysis(words, coocCounts, docFreq, uniqueWordsPerLine, counts,
         const dbRes = runDBSCAN(rawPoints, umapDbscanEps, umapDbscanMinPts);
         umapPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: dbRes.labels[i] }));
         umapDbscanStats = { numClusters: dbRes.numClusters, numNoise: dbRes.numNoise };
+    } else if (clusterMethod === 'hdbscan') {
+        const hdbRes = runHDBSCAN(rawPoints, umapHdbscanMinClusterSize, umapHdbscanMinSamples);
+        umapPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: hdbRes.labels[i] }));
+        umapHdbscanStats = { numClusters: hdbRes.numClusters, numNoise: hdbRes.numNoise };
     } else if (activeUmapK === umapOptimalK && umapOpt.assignments) {
         umapPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: umapOpt.assignments[i] }));
     } else {
@@ -6153,7 +6607,7 @@ function runUMAPAnalysis(words, coocCounts, docFreq, uniqueWordsPerLine, counts,
 }
 
 // Helper to draw UMAP Legend on any canvas
-function drawUMAPLegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, maxCount, k, selectedTheme, selectedFont, isDbscan = false, dbStats = null) {
+function drawUMAPLegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, maxCount, k, selectedTheme, selectedFont, isDbscanOrMethod = false, dbStats = null) {
     const scaleFactor = canvasWidth / 1024;
     const x = 20 * scaleFactor;
     const y = canvasHeight - 75 * scaleFactor;
@@ -6164,7 +6618,10 @@ function drawUMAPLegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, m
     ctx.strokeStyle = isDarkTheme ? 'rgba(15, 23, 42, 0.08)' : 'rgba(0, 0, 0, 0.08)';
     ctx.lineWidth = 1 * scaleFactor;
     
-    const hasNoise = isDbscan && dbStats && dbStats.numNoise > 0;
+    const isMethodHdbscan = (isDbscanOrMethod === 'hdbscan');
+    const isMethodDbscan = (isDbscanOrMethod === 'dbscan' || isDbscanOrMethod === true);
+    const isDensityBased = isMethodDbscan || isMethodHdbscan;
+    const hasNoise = isDensityBased && dbStats && dbStats.numNoise > 0;
     const w = (hasNoise ? 255 : 220) * scaleFactor;
     const h = 56 * scaleFactor;
     const r = 4 * scaleFactor;
@@ -6213,9 +6670,10 @@ function drawUMAPLegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, m
     const dY = y + 42 * scaleFactor;
     const spacing = 10 * scaleFactor;
 
-    if (isDbscan) {
+    if (isDensityBased) {
         const numClust = dbStats ? dbStats.numClusters : 0;
-        const legendLabel = numClust > 0 ? `色:DBSCAN (C1-C${Math.min(numClust, 8)})` : "DBSCAN (0クラスタ)";
+        const methodName = isMethodHdbscan ? 'HDBSCAN' : 'DBSCAN';
+        const legendLabel = numClust > 0 ? `色:${methodName} (C1-C${Math.min(numClust, 8)})` : `${methodName} (0クラスタ)`;
         ctx.fillText(legendLabel, x + 10 * scaleFactor, dY - 4 * scaleFactor);
         
         const startDotX = x + (numClust > 0 ? 115 : 120) * scaleFactor;
@@ -6338,10 +6796,10 @@ function drawUMAPOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThe
     const minCount = Math.min(...counts);
     const maxCount = Math.max(...counts);
     
-    const isDbscan = (clusterMethod === 'dbscan');
+    const isDensityBased = (clusterMethod === 'dbscan' || clusterMethod === 'hdbscan');
     const validClusters = points.map(p => p.cluster).filter(c => c >= 0);
     const maxClusterId = validClusters.length > 0 ? Math.max(...validClusters) : -1;
-    const numClusters = isDbscan 
+    const numClusters = isDensityBased 
         ? (maxClusterId + 1) 
         : ((umapUserManual && umapUserK) ? umapUserK : (umapOptimalK || parseInt(clusterCount?.value) || 3));
     const clusterPoints = Array.from({ length: Math.max(1, numClusters) }, () => []);
@@ -6440,7 +6898,8 @@ function drawUMAPOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThe
         ctx.fillText(p.word, px, labelY);
     });
 
-    drawUMAPLegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, numClusters, selectedTheme, selectedFont, isDbscan, umapDbscanStats);
+    const activeUmapStats = clusterMethod === 'hdbscan' ? umapHdbscanStats : umapDbscanStats;
+    drawUMAPLegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, numClusters, selectedTheme, selectedFont, clusterMethod, activeUmapStats);
 }
 
 // 5. Draw Word Cloud, Canvas Bar Chart, Co-occurrence Network, or PCA Scatter Plot
@@ -6963,6 +7422,15 @@ function renderAnalysisSummary(mode, filteredList) {
                 密集して使われる単語群のみがグループ化され、孤立した語は外れ値として分離されています。<br>
                 横軸(PC1)・縦軸(PC2)はそれぞれ回答全体の傾向をまとめた主な方向性を表します。<br>
                 <span style="color:var(--text-muted);">💡 探索半径(eps)を広げるとクラスタが結合し、狭めるとより細かく分解またはノイズが増加します。</span>`;
+        } else if (clusterMethod === 'hdbscan') {
+            const stats = pcaHdbscanStats || { numClusters: 0, numNoise: 0 };
+            commentHtml = `
+                <b>📊 この結果から読み取れること（HDBSCAN階層的密度クラスタリング）：</b><br>
+                最小クラスタサイズ = <b>${pcaHdbscanMinClusterSize}</b>、最小サンプル数 = <b>${pcaHdbscanMinSamples}</b> により、
+                密度の異なる<b>${stats.numClusters}個の安定クラスター</b> と <b>${stats.numNoise}件の外れ値（ノイズ）</b> を自動検出しました。<br>
+                データの階層的な密度構造から持続性の高いグループを抽出し、孤立した単語は自動的に外れ値として分離されています。<br>
+                横軸(PC1)・縦軸(PC2)はそれぞれ回答全体の傾向をまとめた主な方向性を表します。<br>
+                <span style="color:var(--text-muted);">💡 半径(eps)の設定が不要で、粗い塊と細かい塊が混在していても最適なスケールでクラスタリングできます。</span>`;
         } else {
             const currentK = (pcaUserManual && pcaUserK) ? pcaUserK : (pcaOptimalK || parseInt(clusterCount?.value) || 3);
             const optK = pcaOptimalK || 3;
@@ -6990,6 +7458,14 @@ function renderAnalysisSummary(mode, filteredList) {
                 非線形多様体学習（UMAP）の凝縮された空間において、探索半径 eps = <b>${epsDisplay}</b>、最小点数 MinPts = <b>${umapDbscanMinPts}</b> で分析しました。<br>
                 <b>${stats.numClusters}個の高密度テーマ核</b> と <b>${stats.numNoise}件の外れ値</b> が検出されました。<br>
                 <span style="color:var(--text-muted);">💡 UMAPの局所的なまとまりに対して密度クラスタリングを適用することで、自然な話題グループを自動分離できます。</span>`;
+        } else if (clusterMethod === 'hdbscan') {
+            const stats = umapHdbscanStats || { numClusters: 0, numNoise: 0 };
+            commentHtml = `
+                <b>📊 この結果から読み取れること（HDBSCAN階層的密度クラスタリング）：</b><br>
+                非線形多様体学習（UMAP）の凝縮された空間において、階層的密度推定（HDBSCAN）を実施しました。<br>
+                最小クラスタサイズ = <b>${umapHdbscanMinClusterSize}</b>、最小サンプル数 = <b>${umapHdbscanMinSamples}</b> により、
+                <b>${stats.numClusters}個の安定したテーマ核</b> と <b>${stats.numNoise}件の外れ値</b> を自動検出しました。<br>
+                <span style="color:var(--text-muted);">💡 UMAPの自然な局所密度に合わせて、異なる密度の話題グループを半径指定なしで自動分離できます。</span>`;
         } else {
             const currentK = (umapUserManual && umapUserK) ? umapUserK : (umapOptimalK || parseInt(clusterCount?.value) || 3);
             const optK = umapOptimalK || 3;

@@ -149,7 +149,8 @@
                     <label for="cluster-method-select" style="font-weight: 600; font-size: 12px; color: var(--text-primary); margin-bottom: 4px; display: block;">🎯 クラスター分析手法:</label>
                     <select id="cluster-method-select" class="select-control" style="width: 100%; margin-bottom: 8px; font-size: 12px;">
                         <option value="kmeans" selected>📊 K-Means (K平均法) [標準・重心分割]</option>
-                        <option value="dbscan">🌐 DBSCAN (密度基準・外れ値自動分離)</option>
+                        <option value="dbscan">🌐 DBSCAN (密度基準・探索半径指定)</option>
+                        <option value="hdbscan">🌲 HDBSCAN (階層的密度基準・半径指定不要)</option>
                     </select>
 
                     <!-- K-Means コントロールパネル -->
@@ -197,6 +198,39 @@
                         </div>
                         <p style="font-size: 10px; color: var(--text-muted); margin-top: 6px; margin-bottom: 0; line-height: 1.3;">
                             💡 密度で密集エリアを抽出し、孤立した単語は外れ値（ノイズ）として分離します。
+                        </p>
+                    </div>
+
+                    <!-- HDBSCAN コントロールパネル -->
+                    <div id="hdbscan-controls-panel" style="display: none; background: rgba(0, 0, 0, 0.02); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; margin-top: 4px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <label for="hdbscan-min-cluster-size" style="margin: 0; font-size: 11.5px; font-weight: 600; color: var(--text-primary);">最小クラスタサイズ:</label>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span id="hdbscan-min-cluster-size-val" style="font-size: 12px; font-weight: 700; color: #059669;">3</span>
+                                <button type="button" id="btn-auto-hdbscan" title="推奨値（3）にリセットします" class="btn-subtle" style="font-size: 10px; padding: 2px 6px; height: 22px; color: #059669; border-color: #10b981;">✨ 推奨値</button>
+                            </div>
+                        </div>
+                        <div class="slider-control-row" style="margin-bottom: 6px;">
+                            <button type="button" class="slider-step-btn" data-step-dir="-1" data-slider-id="hdbscan-min-cluster-size" title="減らす (-1)" aria-label="減らす">－</button>
+                            <input type="range" id="hdbscan-min-cluster-size" min="2" max="15" step="1" value="3" class="slider">
+                            <button type="button" class="slider-step-btn" data-step-dir="1" data-slider-id="hdbscan-min-cluster-size" title="増やす (+1)" aria-label="増やす">＋</button>
+                        </div>
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px; margin-bottom: 4px;">
+                            <label for="hdbscan-min-samples" style="margin: 0; font-size: 11.5px; font-weight: 600; color: var(--text-primary);">最小サンプル数 (密度判定):</label>
+                            <span id="hdbscan-min-samples-val" style="font-size: 12px; font-weight: 700; color: #059669;">3</span>
+                        </div>
+                        <div class="slider-control-row" style="margin-bottom: 6px;">
+                            <button type="button" class="slider-step-btn" data-step-dir="-1" data-slider-id="hdbscan-min-samples" title="減らす (-1)" aria-label="減らす">－</button>
+                            <input type="range" id="hdbscan-min-samples" min="2" max="10" step="1" value="3" class="slider">
+                            <button type="button" class="slider-step-btn" data-step-dir="1" data-slider-id="hdbscan-min-samples" title="増やす (+1)" aria-label="増やす">＋</button>
+                        </div>
+
+                        <div id="hdbscan-result-summary" style="margin-top: 6px; font-size: 11px; padding: 4px 6px; background: var(--bg-surface); border-radius: 4px; border: 1px solid var(--border-color); color: var(--text-primary);">
+                            検出クラスタ: <strong>-</strong> / 外れ値: <strong>-</strong>
+                        </div>
+                        <p style="font-size: 10px; color: var(--text-muted); margin-top: 6px; margin-bottom: 0; line-height: 1.3;">
+                            💡 階層的な密度構造から安定したクラスタを自動抽出します。探索半径(eps)の指定が不要で、密度の異なる複数の塊を柔軟に捉えます。
                         </p>
                     </div>
                 </div>
