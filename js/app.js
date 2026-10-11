@@ -86,11 +86,15 @@ let umapDbscanStats = { numClusters: 0, numNoise: 0 };
 // HDBSCAN State
 let pcaHdbscanMinClusterSize = 3;
 let pcaHdbscanMinSamples = 3;
+let pcaHdbscanSelectionMethod = 'eom';
+let pcaHdbscanAllowSingle = false;
 let pcaHdbscanManual = false;
 let pcaHdbscanStats = { numClusters: 0, numNoise: 0 };
 
 let umapHdbscanMinClusterSize = 3;
 let umapHdbscanMinSamples = 3;
+let umapHdbscanSelectionMethod = 'eom';
+let umapHdbscanAllowSingle = false;
 let umapHdbscanManual = false;
 let umapHdbscanStats = { numClusters: 0, numNoise: 0 };
 
@@ -172,6 +176,8 @@ const hdbscanMinClusterSizeVal = document.getElementById('hdbscan-min-cluster-si
 const hdbscanMinSamplesInput = document.getElementById('hdbscan-min-samples');
 const hdbscanMinSamplesVal = document.getElementById('hdbscan-min-samples-val');
 const btnAutoHdbscan = document.getElementById('btn-auto-hdbscan');
+const hdbscanSelectionMethodSelect = document.getElementById('hdbscan-selection-method');
+const hdbscanAllowSingleCheck = document.getElementById('hdbscan-allow-single');
 const hdbscanResultSummary = document.getElementById('hdbscan-result-summary');
 
 // Compound Words Elements
@@ -1051,9 +1057,13 @@ function loadTextAndTokenize(text) {
     umapDbscanManual = false;
     pcaHdbscanMinClusterSize = 3;
     pcaHdbscanMinSamples = 3;
+    pcaHdbscanSelectionMethod = 'eom';
+    pcaHdbscanAllowSingle = false;
     pcaHdbscanManual = false;
     umapHdbscanMinClusterSize = 3;
     umapHdbscanMinSamples = 3;
+    umapHdbscanSelectionMethod = 'eom';
+    umapHdbscanAllowSingle = false;
     umapHdbscanManual = false;
     clusterMethod = 'kmeans';
     if (clusterMethodSelect) clusterMethodSelect.value = 'kmeans';
@@ -2811,14 +2821,18 @@ function updateClusterAssignments(k = null, targetMode = null) {
         if (isPca) {
             const minClSz = pcaHdbscanMinClusterSize || 3;
             const minSamp = pcaHdbscanMinSamples || 3;
-            const hdbRes = runHDBSCAN(rawPcaPoints, minClSz, minSamp);
+            const allowSingle = !!pcaHdbscanAllowSingle;
+            const method = pcaHdbscanSelectionMethod || 'eom';
+            const hdbRes = runHDBSCAN(rawPcaPoints, minClSz, minSamp, allowSingle, method);
             pcaPoints = rawPcaPoints.map((pt, i) => ({ ...pt, cluster: hdbRes.labels[i] }));
             pcaHdbscanStats = { numClusters: hdbRes.numClusters, numNoise: hdbRes.numNoise };
         }
         if (isUmap) {
             const minClSz = umapHdbscanMinClusterSize || 3;
             const minSamp = umapHdbscanMinSamples || 3;
-            const hdbRes = runHDBSCAN(rawUmapPoints, minClSz, minSamp);
+            const allowSingle = !!umapHdbscanAllowSingle;
+            const method = umapHdbscanSelectionMethod || 'eom';
+            const hdbRes = runHDBSCAN(rawUmapPoints, minClSz, minSamp, allowSingle, method);
             umapPoints = rawUmapPoints.map((pt, i) => ({ ...pt, cluster: hdbRes.labels[i] }));
             umapHdbscanStats = { numClusters: hdbRes.numClusters, numNoise: hdbRes.numNoise };
         }
@@ -3005,6 +3019,42 @@ if (hdbscanMinSamplesInput) {
 if (btnAutoHdbscan) {
     btnAutoHdbscan.addEventListener('click', () => {
         autoConfigureHDBSCAN(true);
+    });
+}
+
+if (hdbscanSelectionMethodSelect) {
+    hdbscanSelectionMethodSelect.addEventListener('change', (e) => {
+        const val = e.target.value;
+        const mode = displayType ? displayType.value : '';
+        if (mode === 'umap') {
+            umapHdbscanSelectionMethod = val;
+            umapHdbscanManual = true;
+        } else {
+            pcaHdbscanSelectionMethod = val;
+            pcaHdbscanManual = true;
+        }
+        if (clusterMethod === 'hdbscan' && rawTextData) {
+            updateClusterAssignments(null, mode);
+            updateWordCloud();
+        }
+    });
+}
+
+if (hdbscanAllowSingleCheck) {
+    hdbscanAllowSingleCheck.addEventListener('change', (e) => {
+        const val = !!e.target.checked;
+        const mode = displayType ? displayType.value : '';
+        if (mode === 'umap') {
+            umapHdbscanAllowSingle = val;
+            umapHdbscanManual = true;
+        } else {
+            pcaHdbscanAllowSingle = val;
+            pcaHdbscanManual = true;
+        }
+        if (clusterMethod === 'hdbscan' && rawTextData) {
+            updateClusterAssignments(null, mode);
+            updateWordCloud();
+        }
     });
 }
 
@@ -3628,7 +3678,7 @@ function autoConfigureDBSCAN(applyImmediately = true) {
 }
 
 // HDBSCAN (Hierarchical Density-Based Spatial Clustering of Applications with Noise)
-function runHDBSCAN(points, minClusterSize = 3, minSamples = 3) {
+function runHDBSCAN(points, minClusterSize = 3, minSamples = 3, allowSingleCluster = false, selectionMethod = 'eom') {
     const n = points.length;
     if (n === 0) return { labels: [], numClusters: 0, numNoise: 0, probabilities: [] };
     if (n < minClusterSize) {
@@ -3832,7 +3882,7 @@ function runHDBSCAN(points, minClusterSize = 3, minSamples = 3) {
         cNode.stability = stab;
     }
 
-    // 8. Cluster Selection (Excess of Mass - EOM)
+    // 8. Cluster Selection (Excess of Mass - EOM or Leaf)
     const selectedClusters = new Set();
     const subtreeStability = new Map();
 
@@ -3857,23 +3907,46 @@ function runHDBSCAN(points, minClusterSize = 3, minSamples = 3) {
 
     computeSelection(rootCluster);
 
-    function selectNodes(cNode) {
-        if (cNode.children.length === 0) {
-            selectedClusters.add(cNode.id);
-            return;
-        }
-
-        const maxStab = subtreeStability.get(cNode.id);
-        if (Math.abs(cNode.stability - maxStab) < 1e-9 && cNode.stability > 0) {
-            selectedClusters.add(cNode.id);
-        } else {
+    if (selectionMethod === 'leaf') {
+        // Leaf selection: choose all leaf clusters in condensed tree
+        function selectLeaves(cNode) {
+            if (cNode.children.length === 0) {
+                selectedClusters.add(cNode.id);
+                return;
+            }
             for (const child of cNode.children) {
-                selectNodes(child);
+                selectLeaves(child);
             }
         }
-    }
+        selectLeaves(rootCluster);
+    } else {
+        // EOM selection: choose clusters that maximize stability
+        function selectNodes(cNode) {
+            if (cNode.children.length === 0) {
+                selectedClusters.add(cNode.id);
+                return;
+            }
 
-    selectNodes(rootCluster);
+            // If allowSingleCluster is false, do not allow the root cluster to be selected
+            // Force exploration of children so sub-clusters are extracted
+            if (!allowSingleCluster && cNode.id === rootCluster.id && cNode.children.length > 0) {
+                for (const child of cNode.children) {
+                    selectNodes(child);
+                }
+                return;
+            }
+
+            const maxStab = subtreeStability.get(cNode.id);
+            if (Math.abs(cNode.stability - maxStab) < 1e-9 && cNode.stability > 0) {
+                selectedClusters.add(cNode.id);
+            } else {
+                for (const child of cNode.children) {
+                    selectNodes(child);
+                }
+            }
+        }
+        selectNodes(rootCluster);
+    }
 
     // 9. Assign cluster labels
     const labels = new Array(n).fill(-1);
@@ -3924,6 +3997,8 @@ function syncHDBSCANUIForActiveView() {
     const isUmap = mode === 'umap';
     const currentMinClusterSize = isUmap ? umapHdbscanMinClusterSize : pcaHdbscanMinClusterSize;
     const currentMinSamples = isUmap ? umapHdbscanMinSamples : pcaHdbscanMinSamples;
+    const currentMethod = isUmap ? umapHdbscanSelectionMethod : pcaHdbscanSelectionMethod;
+    const currentAllowSingle = isUmap ? umapHdbscanAllowSingle : pcaHdbscanAllowSingle;
 
     if (hdbscanMinClusterSizeInput) {
         hdbscanMinClusterSizeInput.value = currentMinClusterSize;
@@ -3937,6 +4012,12 @@ function syncHDBSCANUIForActiveView() {
     if (hdbscanMinSamplesVal) {
         hdbscanMinSamplesVal.textContent = currentMinSamples;
     }
+    if (hdbscanSelectionMethodSelect) {
+        hdbscanSelectionMethodSelect.value = currentMethod || 'eom';
+    }
+    if (hdbscanAllowSingleCheck) {
+        hdbscanAllowSingleCheck.checked = !!currentAllowSingle;
+    }
 
     updateHDBSCANSummaryUI();
 }
@@ -3948,10 +4029,14 @@ function autoConfigureHDBSCAN(applyImmediately = true) {
     if (isUmap) {
         umapHdbscanMinClusterSize = 3;
         umapHdbscanMinSamples = 3;
+        umapHdbscanSelectionMethod = 'eom';
+        umapHdbscanAllowSingle = false;
         umapHdbscanManual = false;
     } else {
         pcaHdbscanMinClusterSize = 3;
         pcaHdbscanMinSamples = 3;
+        pcaHdbscanSelectionMethod = 'eom';
+        pcaHdbscanAllowSingle = false;
         pcaHdbscanManual = false;
     }
     
@@ -4987,7 +5072,7 @@ function processAndRender() {
             pcaPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: dbRes.labels[i] }));
             pcaDbscanStats = { numClusters: dbRes.numClusters, numNoise: dbRes.numNoise };
         } else if (clusterMethod === 'hdbscan') {
-            const hdbRes = runHDBSCAN(rawPoints, pcaHdbscanMinClusterSize, pcaHdbscanMinSamples);
+            const hdbRes = runHDBSCAN(rawPoints, pcaHdbscanMinClusterSize, pcaHdbscanMinSamples, !!pcaHdbscanAllowSingle, pcaHdbscanSelectionMethod || 'eom');
             pcaPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: hdbRes.labels[i] }));
             pcaHdbscanStats = { numClusters: hdbRes.numClusters, numNoise: hdbRes.numNoise };
         } else if (activePcaK === pcaOptimalK && pcaOpt.assignments) {
@@ -6595,7 +6680,7 @@ function runUMAPAnalysis(words, coocCounts, docFreq, uniqueWordsPerLine, counts,
         umapPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: dbRes.labels[i] }));
         umapDbscanStats = { numClusters: dbRes.numClusters, numNoise: dbRes.numNoise };
     } else if (clusterMethod === 'hdbscan') {
-        const hdbRes = runHDBSCAN(rawPoints, umapHdbscanMinClusterSize, umapHdbscanMinSamples);
+        const hdbRes = runHDBSCAN(rawPoints, umapHdbscanMinClusterSize, umapHdbscanMinSamples, !!umapHdbscanAllowSingle, umapHdbscanSelectionMethod || 'eom');
         umapPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: hdbRes.labels[i] }));
         umapHdbscanStats = { numClusters: hdbRes.numClusters, numNoise: hdbRes.numNoise };
     } else if (activeUmapK === umapOptimalK && umapOpt.assignments) {
