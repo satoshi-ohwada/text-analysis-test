@@ -71,9 +71,16 @@ let umapUserManual = false;
 
 // Cluster Analysis Method State ('kmeans' or 'dbscan')
 let clusterMethod = 'kmeans'; // 'kmeans', 'dbscan'
-let dbscanEps = 1.0;
-let dbscanMinPts = 3;
+let pcaDbscanEps = null;
+let pcaDbscanMinPts = 3;
+let pcaDbscanManual = false;
+let pcaDbscanOptimalEps = null;
 let pcaDbscanStats = { numClusters: 0, numNoise: 0 };
+
+let umapDbscanEps = null;
+let umapDbscanMinPts = 3;
+let umapDbscanManual = false;
+let umapDbscanOptimalEps = null;
 let umapDbscanStats = { numClusters: 0, numNoise: 0 };
 
 // LDA Topic Model State
@@ -1020,6 +1027,10 @@ function loadTextAndTokenize(text) {
     umapUserManual = false;
     pcaUserK = null;
     umapUserK = null;
+    pcaDbscanEps = null;
+    pcaDbscanManual = false;
+    umapDbscanEps = null;
+    umapDbscanManual = false;
     clusterMethod = 'kmeans';
     if (clusterMethodSelect) clusterMethodSelect.value = 'kmeans';
     if (kmeansControlsPanel) kmeansControlsPanel.style.display = 'block';
@@ -2547,7 +2558,7 @@ function syncClusterUIForActiveView() {
         if (clusterMethod === 'dbscan') {
             kmeansControlsPanel.style.display = 'none';
             dbscanControlsPanel.style.display = 'block';
-            updateDBSCANSummaryUI();
+            syncDBSCANUIForActiveView();
         } else {
             kmeansControlsPanel.style.display = 'block';
             dbscanControlsPanel.style.display = 'none';
@@ -2742,21 +2753,23 @@ displayType.addEventListener('change', () => {
 });
 
 function updateClusterAssignments(k = null, targetMode = null) {
+    const activeMode = displayType ? displayType.value : '';
     const isPca = (!targetMode || targetMode === 'pca') && rawPcaPoints && rawPcaPoints.length > 0;
     const isUmap = (!targetMode || targetMode === 'umap') && rawUmapPoints && rawUmapPoints.length > 0;
 
     if (clusterMethod === 'dbscan') {
-        const eps = dbscanEpsInput ? parseFloat(dbscanEpsInput.value) : dbscanEps;
-        const minPts = dbscanMinPtsInput ? parseInt(dbscanMinPtsInput.value) : dbscanMinPts;
-        dbscanEps = eps;
-        dbscanMinPts = minPts;
-
         if (isPca) {
+            const eps = pcaDbscanEps || estimateDBSCAN_Eps(rawPcaPoints, pcaDbscanMinPts);
+            pcaDbscanEps = eps;
+            const minPts = pcaDbscanMinPts || 3;
             const dbRes = runDBSCAN(rawPcaPoints, eps, minPts);
             pcaPoints = rawPcaPoints.map((pt, i) => ({ ...pt, cluster: dbRes.labels[i] }));
             pcaDbscanStats = { numClusters: dbRes.numClusters, numNoise: dbRes.numNoise };
         }
         if (isUmap) {
+            const eps = umapDbscanEps || estimateDBSCAN_Eps(rawUmapPoints, umapDbscanMinPts);
+            umapDbscanEps = eps;
+            const minPts = umapDbscanMinPts || 3;
             const dbRes = runDBSCAN(rawUmapPoints, eps, minPts);
             umapPoints = rawUmapPoints.map((pt, i) => ({ ...pt, cluster: dbRes.labels[i] }));
             umapDbscanStats = { numClusters: dbRes.numClusters, numNoise: dbRes.numNoise };
@@ -2832,6 +2845,7 @@ if (clusterMethodSelect) {
         } else {
             if (kmeansControlsPanel) kmeansControlsPanel.style.display = 'block';
             if (dbscanControlsPanel) dbscanControlsPanel.style.display = 'none';
+            syncClusterUIForActiveView();
             updateClusterAssignments();
             updateWordCloud();
         }
@@ -2840,10 +2854,21 @@ if (clusterMethodSelect) {
 
 if (dbscanEpsInput) {
     const handleEpsChange = (e) => {
-        dbscanEps = parseFloat(e.target.value);
-        if (dbscanEpsVal) dbscanEpsVal.textContent = dbscanEps.toFixed(2);
+        const val = parseFloat(e.target.value);
+        const mode = displayType ? displayType.value : '';
+        if (mode === 'umap') {
+            umapDbscanEps = val;
+            umapDbscanManual = true;
+        } else {
+            pcaDbscanEps = val;
+            pcaDbscanManual = true;
+        }
+        if (dbscanEpsVal) {
+            const decimals = val < 0.1 ? 3 : 2;
+            dbscanEpsVal.textContent = val.toFixed(decimals);
+        }
         if (clusterMethod === 'dbscan' && rawTextData) {
-            updateClusterAssignments();
+            updateClusterAssignments(null, mode);
             updateWordCloud();
         }
     };
@@ -2853,10 +2878,18 @@ if (dbscanEpsInput) {
 
 if (dbscanMinPtsInput) {
     const handleMinPtsChange = (e) => {
-        dbscanMinPts = parseInt(e.target.value);
-        if (dbscanMinPtsVal) dbscanMinPtsVal.textContent = dbscanMinPts;
+        const val = parseInt(e.target.value);
+        const mode = displayType ? displayType.value : '';
+        if (mode === 'umap') {
+            umapDbscanMinPts = val;
+            umapDbscanManual = true;
+        } else {
+            pcaDbscanMinPts = val;
+            pcaDbscanManual = true;
+        }
+        if (dbscanMinPtsVal) dbscanMinPtsVal.textContent = val;
         if (clusterMethod === 'dbscan' && rawTextData) {
-            updateClusterAssignments();
+            updateClusterAssignments(null, mode);
             updateWordCloud();
         }
     };
@@ -3361,7 +3394,7 @@ function runDBSCAN(points, eps, minPts) {
 
 function estimateDBSCAN_Eps(points, minPts = 3) {
     const n = points.length;
-    if (n <= minPts) return 1.0;
+    if (n <= minPts) return 0.5;
     
     const k = Math.max(1, minPts - 1);
     const kDistances = [];
@@ -3377,9 +3410,31 @@ function estimateDBSCAN_Eps(points, minPts = 3) {
     }
     
     kDistances.sort((a, b) => a - b);
-    const targetIdx = Math.floor(kDistances.length * 0.65);
-    const estimated = kDistances[targetIdx];
-    return Math.max(0.05, parseFloat(estimated.toFixed(2)));
+    
+    // Knee / Elbow detection on the sorted k-distance curve
+    const x0 = 0, y0 = kDistances[0];
+    const x1 = n - 1, y1 = kDistances[n - 1];
+    const ySpan = y1 - y0;
+    
+    let maxDist = -1;
+    let kneeIdx = Math.floor(n * 0.35); // fallback to 35th percentile
+    
+    if (ySpan > 1e-6) {
+        for (let i = Math.floor(n * 0.15); i < Math.floor(n * 0.85); i++) {
+            const nx_i = i / (n - 1);
+            const ny_i = (kDistances[i] - y0) / ySpan;
+            const distToDiag = (nx_i - ny_i);
+            if (distToDiag > maxDist) {
+                maxDist = distToDiag;
+                kneeIdx = i;
+            }
+        }
+    }
+    
+    const estimated = kDistances[kneeIdx];
+    const decimals = estimated < 0.1 ? 3 : 2;
+    const minFloor = estimated < 0.1 ? 0.005 : 0.05;
+    return Math.max(minFloor, parseFloat(estimated.toFixed(decimals)));
 }
 
 function updateDBSCANSummaryUI() {
@@ -3395,29 +3450,74 @@ function updateDBSCANSummaryUI() {
     `;
 }
 
-function autoConfigureDBSCAN(applyImmediately = true) {
+function syncDBSCANUIForActiveView() {
     const mode = displayType ? displayType.value : '';
-    const points = mode === 'umap' ? rawUmapPoints : rawPcaPoints;
-    if (!points || points.length === 0) return;
+    const isUmap = mode === 'umap';
+    const activePoints = isUmap ? rawUmapPoints : rawPcaPoints;
+    if (!activePoints || activePoints.length === 0) return;
+
+    const optEps = isUmap 
+        ? (umapDbscanOptimalEps || estimateDBSCAN_Eps(activePoints, umapDbscanMinPts))
+        : (pcaDbscanOptimalEps || estimateDBSCAN_Eps(activePoints, pcaDbscanMinPts));
     
-    const minPts = dbscanMinPtsInput ? parseInt(dbscanMinPtsInput.value) : (dbscanMinPts || 3);
-    const optEps = estimateDBSCAN_Eps(points, minPts);
-    dbscanEps = optEps;
-    
+    if (isUmap) {
+        umapDbscanOptimalEps = optEps;
+        if (!umapDbscanEps) umapDbscanEps = optEps;
+    } else {
+        pcaDbscanOptimalEps = optEps;
+        if (!pcaDbscanEps) pcaDbscanEps = optEps;
+    }
+
+    const currentEps = isUmap ? umapDbscanEps : pcaDbscanEps;
+    const currentMinPts = isUmap ? umapDbscanMinPts : pcaDbscanMinPts;
+
     if (dbscanEpsInput) {
-        const minEps = Math.max(0.02, parseFloat((optEps * 0.1).toFixed(2)));
-        const maxEps = Math.max(optEps * 3.0, 5.0);
+        const minEps = currentEps < 0.1 ? 0.005 : Math.max(0.02, parseFloat((optEps * 0.1).toFixed(2)));
+        const maxEps = currentEps < 0.1 ? Math.max(0.3, parseFloat((optEps * 4.0).toFixed(2))) : Math.max(optEps * 3.0, 5.0);
+        const stepEps = currentEps < 0.1 ? 0.005 : (parseFloat((optEps * 0.05).toFixed(2)) || 0.05);
+        
         dbscanEpsInput.min = minEps;
-        dbscanEpsInput.max = parseFloat(maxEps.toFixed(2));
-        dbscanEpsInput.step = parseFloat((optEps * 0.05).toFixed(2)) || 0.05;
-        dbscanEpsInput.value = optEps;
+        dbscanEpsInput.max = maxEps;
+        dbscanEpsInput.step = stepEps;
+        dbscanEpsInput.value = currentEps;
     }
     if (dbscanEpsVal) {
-        dbscanEpsVal.textContent = optEps.toFixed(2);
+        const decimals = currentEps < 0.1 ? 3 : 2;
+        dbscanEpsVal.textContent = currentEps.toFixed(decimals);
+    }
+    if (dbscanMinPtsInput) {
+        dbscanMinPtsInput.value = currentMinPts;
+    }
+    if (dbscanMinPtsVal) {
+        dbscanMinPtsVal.textContent = currentMinPts;
+    }
+
+    updateDBSCANSummaryUI();
+}
+
+function autoConfigureDBSCAN(applyImmediately = true) {
+    const mode = displayType ? displayType.value : '';
+    const isUmap = mode === 'umap';
+    const points = isUmap ? rawUmapPoints : rawPcaPoints;
+    if (!points || points.length === 0) return;
+    
+    const minPts = isUmap ? umapDbscanMinPts : pcaDbscanMinPts;
+    const optEps = estimateDBSCAN_Eps(points, minPts);
+    
+    if (isUmap) {
+        umapDbscanOptimalEps = optEps;
+        umapDbscanEps = optEps;
+        umapDbscanManual = false;
+    } else {
+        pcaDbscanOptimalEps = optEps;
+        pcaDbscanEps = optEps;
+        pcaDbscanManual = false;
     }
     
+    syncDBSCANUIForActiveView();
+    
     if (applyImmediately && clusterMethod === 'dbscan') {
-        updateClusterAssignments();
+        updateClusterAssignments(null, mode);
         updateWordCloud();
     }
 }
@@ -4436,8 +4536,13 @@ function processAndRender() {
         const activePcaK = (pcaUserManual && pcaUserK) ? pcaUserK : pcaOptimalK;
         pcaUserK = activePcaK;
         
+        if (!pcaDbscanOptimalEps || !pcaDbscanManual) {
+            pcaDbscanOptimalEps = estimateDBSCAN_Eps(rawPoints, pcaDbscanMinPts);
+            if (!pcaDbscanManual) pcaDbscanEps = pcaDbscanOptimalEps;
+        }
+
         if (clusterMethod === 'dbscan') {
-            const dbRes = runDBSCAN(rawPoints, dbscanEps, dbscanMinPts);
+            const dbRes = runDBSCAN(rawPoints, pcaDbscanEps, pcaDbscanMinPts);
             pcaPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: dbRes.labels[i] }));
             pcaDbscanStats = { numClusters: dbRes.numClusters, numNoise: dbRes.numNoise };
         } else if (activePcaK === pcaOptimalK && pcaOpt.assignments) {
@@ -6030,8 +6135,13 @@ function runUMAPAnalysis(words, coocCounts, docFreq, uniqueWordsPerLine, counts,
     const activeUmapK = (umapUserManual && umapUserK) ? umapUserK : umapOptimalK;
     umapUserK = activeUmapK;
 
+    if (!umapDbscanOptimalEps || !umapDbscanManual) {
+        umapDbscanOptimalEps = estimateDBSCAN_Eps(rawPoints, umapDbscanMinPts);
+        if (!umapDbscanManual) umapDbscanEps = umapDbscanOptimalEps;
+    }
+
     if (clusterMethod === 'dbscan') {
-        const dbRes = runDBSCAN(rawPoints, dbscanEps, dbscanMinPts);
+        const dbRes = runDBSCAN(rawPoints, umapDbscanEps, umapDbscanMinPts);
         umapPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: dbRes.labels[i] }));
         umapDbscanStats = { numClusters: dbRes.numClusters, numNoise: dbRes.numNoise };
     } else if (activeUmapK === umapOptimalK && umapOpt.assignments) {
@@ -6845,9 +6955,10 @@ function renderAnalysisSummary(mode, filteredList) {
         // ① PCA用コメント
         if (clusterMethod === 'dbscan') {
             const stats = pcaDbscanStats || { numClusters: 0, numNoise: 0 };
+            const epsDisplay = (pcaDbscanEps < 0.1 ? pcaDbscanEps.toFixed(3) : pcaDbscanEps.toFixed(2));
             commentHtml = `
                 <b>📊 この結果から読み取れること（DBSCAN密度クラスタリング）：</b><br>
-                探索半径 eps = <b>${dbscanEps.toFixed(2)}</b>、最小点数 MinPts = <b>${dbscanMinPts}</b> により、
+                探索半径 eps = <b>${epsDisplay}</b>、最小点数 MinPts = <b>${pcaDbscanMinPts}</b> により、
                 <b>${stats.numClusters}個のクラスター</b> と <b>${stats.numNoise}件の外れ値（ノイズ）</b> を検出しました。<br>
                 密集して使われる単語群のみがグループ化され、孤立した語は外れ値として分離されています。<br>
                 横軸(PC1)・縦軸(PC2)はそれぞれ回答全体の傾向をまとめた主な方向性を表します。<br>
@@ -6873,9 +6984,10 @@ function renderAnalysisSummary(mode, filteredList) {
         // ① UMAP用コメント
         if (clusterMethod === 'dbscan') {
             const stats = umapDbscanStats || { numClusters: 0, numNoise: 0 };
+            const epsDisplay = (umapDbscanEps < 0.1 ? umapDbscanEps.toFixed(3) : umapDbscanEps.toFixed(2));
             commentHtml = `
                 <b>📊 この結果から読み取れること（DBSCAN密度クラスタリング）：</b><br>
-                非線形多様体学習（UMAP）の凝縮された空間において、探索半径 eps = <b>${dbscanEps.toFixed(2)}</b>、最小点数 MinPts = <b>${dbscanMinPts}</b> で分析しました。<br>
+                非線形多様体学習（UMAP）の凝縮された空間において、探索半径 eps = <b>${epsDisplay}</b>、最小点数 MinPts = <b>${umapDbscanMinPts}</b> で分析しました。<br>
                 <b>${stats.numClusters}個の高密度テーマ核</b> と <b>${stats.numNoise}件の外れ値</b> が検出されました。<br>
                 <span style="color:var(--text-muted);">💡 UMAPの局所的なまとまりに対して密度クラスタリングを適用することで、自然な話題グループを自動分離できます。</span>`;
         } else {
