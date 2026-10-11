@@ -69,6 +69,13 @@ let umapOptimalK = 3;
 let umapUserK = 3;
 let umapUserManual = false;
 
+// Cluster Analysis Method State ('kmeans' or 'dbscan')
+let clusterMethod = 'kmeans'; // 'kmeans', 'dbscan'
+let dbscanEps = 1.0;
+let dbscanMinPts = 3;
+let pcaDbscanStats = { numClusters: 0, numNoise: 0 };
+let umapDbscanStats = { numClusters: 0, numNoise: 0 };
+
 // LDA Topic Model State
 let currentLdaResult = null;
 
@@ -129,9 +136,18 @@ const rotateText = document.getElementById('rotate-text');
 const displayType = document.getElementById('display-type');
 const methodDescription = document.getElementById('method-description');
 const clusterCountGroup = document.getElementById('cluster-count-group');
+const clusterMethodSelect = document.getElementById('cluster-method-select');
+const kmeansControlsPanel = document.getElementById('kmeans-controls-panel');
+const dbscanControlsPanel = document.getElementById('dbscan-controls-panel');
 const clusterCount = document.getElementById('cluster-count');
 const clusterAutoBadge = document.getElementById('cluster-auto-badge');
 const btnClusterReset = document.getElementById('btn-cluster-reset');
+const dbscanEpsInput = document.getElementById('dbscan-eps');
+const dbscanEpsVal = document.getElementById('dbscan-eps-val');
+const dbscanMinPtsInput = document.getElementById('dbscan-min-pts');
+const dbscanMinPtsVal = document.getElementById('dbscan-min-pts-val');
+const btnAutoDbscanEps = document.getElementById('btn-auto-dbscan-eps');
+const dbscanResultSummary = document.getElementById('dbscan-result-summary');
 
 // Compound Words Elements
 const newCompoundWordInput = document.getElementById('new-compound-word');
@@ -1004,6 +1020,10 @@ function loadTextAndTokenize(text) {
     umapUserManual = false;
     pcaUserK = null;
     umapUserK = null;
+    clusterMethod = 'kmeans';
+    if (clusterMethodSelect) clusterMethodSelect.value = 'kmeans';
+    if (kmeansControlsPanel) kmeansControlsPanel.style.display = 'block';
+    if (dbscanControlsPanel) dbscanControlsPanel.style.display = 'none';
     const lines = rawTextData.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     opinionLinesCount = lines.length;
 
@@ -2519,8 +2539,22 @@ redrawElements.forEach(elem => {
 });
 
 function syncClusterUIForActiveView() {
-    if (!clusterCount) return;
     const mode = displayType ? displayType.value : '';
+    if (clusterMethodSelect) {
+        clusterMethodSelect.value = clusterMethod;
+    }
+    if (kmeansControlsPanel && dbscanControlsPanel) {
+        if (clusterMethod === 'dbscan') {
+            kmeansControlsPanel.style.display = 'none';
+            dbscanControlsPanel.style.display = 'block';
+            updateDBSCANSummaryUI();
+        } else {
+            kmeansControlsPanel.style.display = 'block';
+            dbscanControlsPanel.style.display = 'none';
+        }
+    }
+
+    if (!clusterCount) return;
     let optimalK = 3;
     let currentK = 3;
 
@@ -2707,14 +2741,39 @@ displayType.addEventListener('change', () => {
     }
 });
 
-function updateClusterAssignments(k, targetMode = null) {
-    if ((!targetMode || targetMode === 'pca') && rawPcaPoints && rawPcaPoints.length > 0) {
-        const assignments = runKMeans(rawPcaPoints, k);
-        pcaPoints = rawPcaPoints.map((pt, i) => ({ ...pt, cluster: assignments[i] }));
-    }
-    if ((!targetMode || targetMode === 'umap') && rawUmapPoints && rawUmapPoints.length > 0) {
-        const assignments = runKMeans(rawUmapPoints, k);
-        umapPoints = rawUmapPoints.map((pt, i) => ({ ...pt, cluster: assignments[i] }));
+function updateClusterAssignments(k = null, targetMode = null) {
+    const isPca = (!targetMode || targetMode === 'pca') && rawPcaPoints && rawPcaPoints.length > 0;
+    const isUmap = (!targetMode || targetMode === 'umap') && rawUmapPoints && rawUmapPoints.length > 0;
+
+    if (clusterMethod === 'dbscan') {
+        const eps = dbscanEpsInput ? parseFloat(dbscanEpsInput.value) : dbscanEps;
+        const minPts = dbscanMinPtsInput ? parseInt(dbscanMinPtsInput.value) : dbscanMinPts;
+        dbscanEps = eps;
+        dbscanMinPts = minPts;
+
+        if (isPca) {
+            const dbRes = runDBSCAN(rawPcaPoints, eps, minPts);
+            pcaPoints = rawPcaPoints.map((pt, i) => ({ ...pt, cluster: dbRes.labels[i] }));
+            pcaDbscanStats = { numClusters: dbRes.numClusters, numNoise: dbRes.numNoise };
+        }
+        if (isUmap) {
+            const dbRes = runDBSCAN(rawUmapPoints, eps, minPts);
+            umapPoints = rawUmapPoints.map((pt, i) => ({ ...pt, cluster: dbRes.labels[i] }));
+            umapDbscanStats = { numClusters: dbRes.numClusters, numNoise: dbRes.numNoise };
+        }
+        updateDBSCANSummaryUI();
+    } else {
+        const effPcaK = (targetMode === 'pca' && k) ? k : ((pcaUserManual && pcaUserK) ? pcaUserK : (k || parseInt(clusterCount?.value) || 3));
+        const effUmapK = (targetMode === 'umap' && k) ? k : ((umapUserManual && umapUserK) ? umapUserK : (k || parseInt(clusterCount?.value) || 3));
+
+        if (isPca) {
+            const assignments = runKMeans(rawPcaPoints, effPcaK);
+            pcaPoints = rawPcaPoints.map((pt, i) => ({ ...pt, cluster: assignments[i] }));
+        }
+        if (isUmap) {
+            const assignments = runKMeans(rawUmapPoints, effUmapK);
+            umapPoints = rawUmapPoints.map((pt, i) => ({ ...pt, cluster: assignments[i] }));
+        }
     }
 }
 
@@ -2759,6 +2818,55 @@ if (btnClusterReset) {
             updateClusterAssignments(umapOptimalK, 'umap');
         }
         updateWordCloud();
+    });
+}
+
+// DBSCAN Control Listeners
+if (clusterMethodSelect) {
+    clusterMethodSelect.addEventListener('change', (e) => {
+        clusterMethod = e.target.value;
+        if (clusterMethod === 'dbscan') {
+            if (kmeansControlsPanel) kmeansControlsPanel.style.display = 'none';
+            if (dbscanControlsPanel) dbscanControlsPanel.style.display = 'block';
+            autoConfigureDBSCAN(true);
+        } else {
+            if (kmeansControlsPanel) kmeansControlsPanel.style.display = 'block';
+            if (dbscanControlsPanel) dbscanControlsPanel.style.display = 'none';
+            updateClusterAssignments();
+            updateWordCloud();
+        }
+    });
+}
+
+if (dbscanEpsInput) {
+    const handleEpsChange = (e) => {
+        dbscanEps = parseFloat(e.target.value);
+        if (dbscanEpsVal) dbscanEpsVal.textContent = dbscanEps.toFixed(2);
+        if (clusterMethod === 'dbscan' && rawTextData) {
+            updateClusterAssignments();
+            updateWordCloud();
+        }
+    };
+    dbscanEpsInput.addEventListener('input', handleEpsChange);
+    dbscanEpsInput.addEventListener('change', handleEpsChange);
+}
+
+if (dbscanMinPtsInput) {
+    const handleMinPtsChange = (e) => {
+        dbscanMinPts = parseInt(e.target.value);
+        if (dbscanMinPtsVal) dbscanMinPtsVal.textContent = dbscanMinPts;
+        if (clusterMethod === 'dbscan' && rawTextData) {
+            updateClusterAssignments();
+            updateWordCloud();
+        }
+    };
+    dbscanMinPtsInput.addEventListener('input', handleMinPtsChange);
+    dbscanMinPtsInput.addEventListener('change', handleMinPtsChange);
+}
+
+if (btnAutoDbscanEps) {
+    btnAutoDbscanEps.addEventListener('click', () => {
+        autoConfigureDBSCAN(true);
     });
 }
 
@@ -2951,7 +3059,8 @@ cloudCanvas.addEventListener('mousemove', (e) => {
                 const tInfo = currentLdaResult.wordTopics[hoveredPoint.word];
                 ldaTopicText = `<br><span style="color: var(--accent-blue); font-weight: 600;">所属トピック: ${tInfo.label} (${(tInfo.prob * 100).toFixed(0)}%)</span>`;
             }
-            tooltip.innerHTML = `<strong>${hoveredPoint.word}</strong><br>出現回数: ${hoveredPoint.count}回<br>クラスター: C${hoveredPoint.cluster + 1}${ldaTopicText}<br><small style="color: var(--text-muted)">ダブルクリックで除外</small>`;
+            const clusterLabel = hoveredPoint.cluster >= 0 ? `C${hoveredPoint.cluster + 1}` : '外れ値 (ノイズ)';
+            tooltip.innerHTML = `<strong>${hoveredPoint.word}</strong><br>出現回数: ${hoveredPoint.count}回<br>クラスター: ${clusterLabel}${ldaTopicText}<br><small style="color: var(--text-muted)">ダブルクリックで除外</small>`;
             cloudCanvas.style.cursor = 'pointer';
         } else {
             tooltip.style.display = 'none';
@@ -3162,6 +3271,156 @@ cloudCanvas.addEventListener('dblclick', (e) => {
         }
     }
 });
+
+// DBSCAN Clustering Engine & Distance Helpers (Ref: pca-test)
+function euclideanDistance(p1, p2) {
+    if (Array.isArray(p1) && Array.isArray(p2)) {
+        let sum = 0;
+        for (let i = 0; i < p1.length; i++) {
+            const d = p1[i] - p2[i];
+            sum += d * d;
+        }
+        return Math.sqrt(sum);
+    }
+    const x1 = p1.x !== undefined ? p1.x : p1[0];
+    const y1 = p1.y !== undefined ? p1.y : p1[1];
+    const x2 = p2.x !== undefined ? p2.x : p2[0];
+    const y2 = p2.y !== undefined ? p2.y : p2[1];
+    const dx = x1 - x2;
+    const dy = y1 - y2;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+function runDBSCAN(points, eps, minPts) {
+    const n = points.length;
+    if (n === 0) return { labels: [], numClusters: 0, numNoise: 0 };
+    
+    const labels = new Array(n);
+    const visited = new Array(n).fill(false);
+    let clusterId = 0;
+    
+    const neighbors = [];
+    for (let i = 0; i < n; i++) {
+        const nb = [];
+        for (let j = 0; j < n; j++) {
+            if (euclideanDistance(points[i], points[j]) <= eps) {
+                nb.push(j);
+            }
+        }
+        neighbors.push(nb);
+    }
+    
+    for (let i = 0; i < n; i++) {
+        if (visited[i]) continue;
+        visited[i] = true;
+        
+        if (neighbors[i].length < minPts) {
+            labels[i] = -1; // ノイズ（外れ値）
+            continue;
+        }
+        
+        // 新規クラスタ開始
+        labels[i] = clusterId;
+        const seedSet = [...neighbors[i]];
+        const seedIdx = seedSet.indexOf(i);
+        if (seedIdx > -1) seedSet.splice(seedIdx, 1);
+        
+        let idx = 0;
+        while (idx < seedSet.length) {
+            const curr = seedSet[idx];
+            idx++;
+            
+            if (labels[curr] === -1) {
+                labels[curr] = clusterId; // ノイズから境界点に昇格
+            }
+            if (visited[curr]) continue;
+            
+            visited[curr] = true;
+            labels[curr] = clusterId;
+            
+            if (neighbors[curr].length >= minPts) {
+                for (let q = 0; q < neighbors[curr].length; q++) {
+                    const pt = neighbors[curr][q];
+                    if (!seedSet.includes(pt) && pt !== curr) {
+                        seedSet.push(pt);
+                    }
+                }
+            }
+        }
+        clusterId++;
+    }
+    
+    for (let i = 0; i < n; i++) {
+        if (labels[i] === undefined) labels[i] = -1;
+    }
+    
+    const numClusters = clusterId;
+    const numNoise = labels.filter(l => l === -1).length;
+    return { labels, numClusters, numNoise };
+}
+
+function estimateDBSCAN_Eps(points, minPts = 3) {
+    const n = points.length;
+    if (n <= minPts) return 1.0;
+    
+    const k = Math.max(1, minPts - 1);
+    const kDistances = [];
+    for (let i = 0; i < n; i++) {
+        const dists = [];
+        for (let j = 0; j < n; j++) {
+            if (i !== j) {
+                dists.push(euclideanDistance(points[i], points[j]));
+            }
+        }
+        dists.sort((a, b) => a - b);
+        kDistances.push(dists[Math.min(k, dists.length - 1)]);
+    }
+    
+    kDistances.sort((a, b) => a - b);
+    const targetIdx = Math.floor(kDistances.length * 0.65);
+    const estimated = kDistances[targetIdx];
+    return Math.max(0.05, parseFloat(estimated.toFixed(2)));
+}
+
+function updateDBSCANSummaryUI() {
+    if (!dbscanResultSummary) return;
+    const mode = displayType ? displayType.value : '';
+    const stats = mode === 'umap' ? umapDbscanStats : pcaDbscanStats;
+    const { numClusters, numNoise } = stats || { numClusters: 0, numNoise: 0 };
+    dbscanResultSummary.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>検出クラスタ: <strong style="color: var(--accent-blue);">${numClusters}個</strong></span>
+            <span>外れ値 (ノイズ): <strong style="color: ${numNoise > 0 ? '#dc2626' : '#16a34a'};">${numNoise}件</strong></span>
+        </div>
+    `;
+}
+
+function autoConfigureDBSCAN(applyImmediately = true) {
+    const mode = displayType ? displayType.value : '';
+    const points = mode === 'umap' ? rawUmapPoints : rawPcaPoints;
+    if (!points || points.length === 0) return;
+    
+    const minPts = dbscanMinPtsInput ? parseInt(dbscanMinPtsInput.value) : (dbscanMinPts || 3);
+    const optEps = estimateDBSCAN_Eps(points, minPts);
+    dbscanEps = optEps;
+    
+    if (dbscanEpsInput) {
+        const minEps = Math.max(0.02, parseFloat((optEps * 0.1).toFixed(2)));
+        const maxEps = Math.max(optEps * 3.0, 5.0);
+        dbscanEpsInput.min = minEps;
+        dbscanEpsInput.max = parseFloat(maxEps.toFixed(2));
+        dbscanEpsInput.step = parseFloat((optEps * 0.05).toFixed(2)) || 0.05;
+        dbscanEpsInput.value = optEps;
+    }
+    if (dbscanEpsVal) {
+        dbscanEpsVal.textContent = optEps.toFixed(2);
+    }
+    
+    if (applyImmediately && clusterMethod === 'dbscan') {
+        updateClusterAssignments();
+        updateWordCloud();
+    }
+}
 
 // K-means Clustering Helper
 // Uses K-means++ initialization for better starting centroids,
@@ -3526,7 +3785,9 @@ if (exportWordsCsvBtn) {
         let csv = "単語,出現回数,特徴度 (TF-IDF),クラスターID\n";
         wordFrequencies.forEach(item => {
             const pt = activePoints.find(p => p.word === item.text);
-            const clusterId = (pt && pt.cluster !== undefined && pt.cluster >= 0) ? `C${pt.cluster + 1}` : "-";
+            const clusterId = (pt && pt.cluster !== undefined && pt.cluster >= 0) 
+                ? `C${pt.cluster + 1}` 
+                : (pt && pt.cluster === -1 ? "外れ値 (ノイズ)" : "-");
             const escapedWord = item.text.includes('"') ? item.text.replace(/"/g, '""') : item.text;
             csv += `"${escapedWord}",${item.count},${item.tfidf.toFixed(4)},${clusterId}\n`;
         });
@@ -4175,7 +4436,11 @@ function processAndRender() {
         const activePcaK = (pcaUserManual && pcaUserK) ? pcaUserK : pcaOptimalK;
         pcaUserK = activePcaK;
         
-        if (activePcaK === pcaOptimalK && pcaOpt.assignments) {
+        if (clusterMethod === 'dbscan') {
+            const dbRes = runDBSCAN(rawPoints, dbscanEps, dbscanMinPts);
+            pcaPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: dbRes.labels[i] }));
+            pcaDbscanStats = { numClusters: dbRes.numClusters, numNoise: dbRes.numNoise };
+        } else if (activePcaK === pcaOptimalK && pcaOpt.assignments) {
             pcaPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: pcaOpt.assignments[i] }));
         } else {
             const assignments = runKMeans(rawPoints, activePcaK);
@@ -5264,7 +5529,7 @@ function drawNetworkOnCanvas(canvas, nodes, edges, selectedTheme, selectedFont, 
 }
 
 // Helper to draw PCA Legend on any canvas
-function drawPCALegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, maxCount, k, selectedTheme, selectedFont) {
+function drawPCALegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, maxCount, k, selectedTheme, selectedFont, isDbscan = false, dbStats = null) {
     const scaleFactor = canvasWidth / 1024;
     const x = 20 * scaleFactor;
     const y = canvasHeight - 75 * scaleFactor;
@@ -5275,7 +5540,8 @@ function drawPCALegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, ma
     ctx.strokeStyle = isDarkTheme ? 'rgba(15, 23, 42, 0.08)' : 'rgba(0, 0, 0, 0.08)';
     ctx.lineWidth = 1 * scaleFactor;
     
-    const w = 210 * scaleFactor;
+    const hasNoise = isDbscan && dbStats && dbStats.numNoise > 0;
+    const w = (hasNoise ? 245 : 210) * scaleFactor;
     const h = 56 * scaleFactor;
     const r = 4 * scaleFactor;
     
@@ -5321,17 +5587,48 @@ function drawPCALegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, ma
     ctx.fillText(`${maxCount}回`, x + 115 * scaleFactor, cY - 4 * scaleFactor);
     
     const dY = y + 42 * scaleFactor;
-    ctx.fillText("色:クラスター (C1-C8)", x + 10 * scaleFactor, dY - 4 * scaleFactor);
-    
     const spacing = 10 * scaleFactor;
-    for (let i = 0; i < Math.min(k, 8); i++) {
-        const color = getNetworkNodeColor(selectedTheme, i, isDarkTheme);
-        const dotX = x + 115 * scaleFactor + i * spacing;
+
+    if (isDbscan) {
+        const numClust = dbStats ? dbStats.numClusters : 0;
+        const legendLabel = numClust > 0 ? `色:DBSCAN (C1-C${Math.min(numClust, 8)})` : "DBSCAN (0クラスタ)";
+        ctx.fillText(legendLabel, x + 10 * scaleFactor, dY - 4 * scaleFactor);
         
-        ctx.beginPath();
-        ctx.arc(dotX, dY, 3 * scaleFactor, 0, 2 * Math.PI);
-        ctx.fillStyle = color;
-        ctx.fill();
+        const startDotX = x + (numClust > 0 ? 115 : 120) * scaleFactor;
+        for (let i = 0; i < Math.min(numClust, 8); i++) {
+            const color = getNetworkNodeColor(selectedTheme, i, isDarkTheme);
+            const dotX = startDotX + i * spacing;
+            
+            ctx.beginPath();
+            ctx.arc(dotX, dY, 3 * scaleFactor, 0, 2 * Math.PI);
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+        
+        if (hasNoise) {
+            const noiseDotX = startDotX + Math.min(numClust, 8) * spacing + 6 * scaleFactor;
+            ctx.beginPath();
+            ctx.arc(noiseDotX, dY, 3 * scaleFactor, 0, 2 * Math.PI);
+            ctx.fillStyle = isDarkTheme ? '#64748b' : '#94a3b8';
+            ctx.fill();
+            ctx.strokeStyle = isDarkTheme ? '#cbd5e1' : '#475569';
+            ctx.lineWidth = 1 * scaleFactor;
+            ctx.setLineDash([2 * scaleFactor, 2 * scaleFactor]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillText("外れ値", noiseDotX + 6 * scaleFactor, dY - 4 * scaleFactor);
+        }
+    } else {
+        ctx.fillText("色:クラスター (C1-C8)", x + 10 * scaleFactor, dY - 4 * scaleFactor);
+        for (let i = 0; i < Math.min(k, 8); i++) {
+            const color = getNetworkNodeColor(selectedTheme, i, isDarkTheme);
+            const dotX = x + 115 * scaleFactor + i * spacing;
+            
+            ctx.beginPath();
+            ctx.arc(dotX, dY, 3 * scaleFactor, 0, 2 * Math.PI);
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
     }
     
     ctx.restore();
@@ -5420,10 +5717,15 @@ function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThem
     const minCount = Math.min(...counts);
     const maxCount = Math.max(...counts);
     
-    const k = (pcaUserManual && pcaUserK) ? pcaUserK : (pcaOptimalK || parseInt(clusterCount?.value) || 3);
-    const clusterPoints = Array.from({ length: k }, () => []);
+    const isDbscan = (clusterMethod === 'dbscan');
+    const validClusters = points.map(p => p.cluster).filter(c => c >= 0);
+    const maxClusterId = validClusters.length > 0 ? Math.max(...validClusters) : -1;
+    const numClusters = isDbscan 
+        ? (maxClusterId + 1) 
+        : ((pcaUserManual && pcaUserK) ? pcaUserK : (pcaOptimalK || parseInt(clusterCount?.value) || 3));
+    const clusterPoints = Array.from({ length: Math.max(1, numClusters) }, () => []);
     points.forEach(p => {
-        if (p.cluster >= 0 && p.cluster < k) {
+        if (p.cluster >= 0 && p.cluster < clusterPoints.length) {
             clusterPoints[p.cluster].push(p);
         }
     });
@@ -5473,18 +5775,29 @@ function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThem
             radius = 5 + ((p.count - minCount) / (maxCount - minCount)) * 14;
         }
         
-        const color = getNetworkNodeColor(selectedTheme, p.cluster, isDarkTheme);
+        const isNoise = (p.cluster === -1);
+        const color = isNoise
+            ? (isDarkTheme ? '#64748b' : '#94a3b8')
+            : getNetworkNodeColor(selectedTheme, p.cluster, isDarkTheme);
         
         ctx.beginPath();
         ctx.arc(px, py, radius * scaleFactor, 0, 2 * Math.PI);
         ctx.fillStyle = color;
         ctx.fill();
         
-        ctx.strokeStyle = selectedTheme === 'pure-bw' 
-            ? '#000000' 
-            : (isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.3)');
-        ctx.lineWidth = 1.5 * scaleFactor;
+        ctx.strokeStyle = isNoise
+            ? (isDarkTheme ? '#cbd5e1' : '#475569')
+            : (selectedTheme === 'pure-bw' 
+                ? '#000000' 
+                : (isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.3)'));
+        ctx.lineWidth = (isNoise ? 2 : 1.5) * scaleFactor;
+        if (isNoise) {
+            ctx.setLineDash([3 * scaleFactor, 3 * scaleFactor]);
+        } else {
+            ctx.setLineDash([]);
+        }
         ctx.stroke();
+        ctx.setLineDash([]);
         
         const baseFontSize = (networkFontSizeRange && networkFontSizeRange.value) ? parseInt(networkFontSizeRange.value, 10) : 15;
         const fontSizePx = Math.round(baseFontSize * scaleFactor);
@@ -5500,11 +5813,13 @@ function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThem
         ctx.lineJoin = 'round';
         ctx.strokeText(p.word, px, labelY);
         
-        ctx.fillStyle = isDarkTheme ? '#F3F4F6' : '#111111';
+        ctx.fillStyle = isNoise
+            ? (isDarkTheme ? '#94a3b8' : '#64748b')
+            : (isDarkTheme ? '#F3F4F6' : '#111111');
         ctx.fillText(p.word, px, labelY);
     });
 
-    drawPCALegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, k, selectedTheme, selectedFont);
+    drawPCALegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, numClusters, selectedTheme, selectedFont, isDbscan, pcaDbscanStats);
 }
 
 // ==========================================
@@ -5715,7 +6030,11 @@ function runUMAPAnalysis(words, coocCounts, docFreq, uniqueWordsPerLine, counts,
     const activeUmapK = (umapUserManual && umapUserK) ? umapUserK : umapOptimalK;
     umapUserK = activeUmapK;
 
-    if (activeUmapK === umapOptimalK && umapOpt.assignments) {
+    if (clusterMethod === 'dbscan') {
+        const dbRes = runDBSCAN(rawPoints, dbscanEps, dbscanMinPts);
+        umapPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: dbRes.labels[i] }));
+        umapDbscanStats = { numClusters: dbRes.numClusters, numNoise: dbRes.numNoise };
+    } else if (activeUmapK === umapOptimalK && umapOpt.assignments) {
         umapPoints = rawPoints.map((pt, i) => ({ ...pt, cluster: umapOpt.assignments[i] }));
     } else {
         const assignments = runKMeans(rawPoints, activeUmapK);
@@ -5724,7 +6043,7 @@ function runUMAPAnalysis(words, coocCounts, docFreq, uniqueWordsPerLine, counts,
 }
 
 // Helper to draw UMAP Legend on any canvas
-function drawUMAPLegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, maxCount, k, selectedTheme, selectedFont) {
+function drawUMAPLegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, maxCount, k, selectedTheme, selectedFont, isDbscan = false, dbStats = null) {
     const scaleFactor = canvasWidth / 1024;
     const x = 20 * scaleFactor;
     const y = canvasHeight - 75 * scaleFactor;
@@ -5735,7 +6054,8 @@ function drawUMAPLegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, m
     ctx.strokeStyle = isDarkTheme ? 'rgba(15, 23, 42, 0.08)' : 'rgba(0, 0, 0, 0.08)';
     ctx.lineWidth = 1 * scaleFactor;
     
-    const w = 220 * scaleFactor;
+    const hasNoise = isDbscan && dbStats && dbStats.numNoise > 0;
+    const w = (hasNoise ? 255 : 220) * scaleFactor;
     const h = 56 * scaleFactor;
     const r = 4 * scaleFactor;
     
@@ -5781,17 +6101,48 @@ function drawUMAPLegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, m
     ctx.fillText(`${maxCount}回`, x + 115 * scaleFactor, cY - 4 * scaleFactor);
     
     const dY = y + 42 * scaleFactor;
-    ctx.fillText("色:クラスター (C1-C8)", x + 10 * scaleFactor, dY - 4 * scaleFactor);
-    
     const spacing = 10 * scaleFactor;
-    for (let i = 0; i < Math.min(k, 8); i++) {
-        const color = getNetworkNodeColor(selectedTheme, i, isDarkTheme);
-        const dotX = x + 115 * scaleFactor + i * spacing;
+
+    if (isDbscan) {
+        const numClust = dbStats ? dbStats.numClusters : 0;
+        const legendLabel = numClust > 0 ? `色:DBSCAN (C1-C${Math.min(numClust, 8)})` : "DBSCAN (0クラスタ)";
+        ctx.fillText(legendLabel, x + 10 * scaleFactor, dY - 4 * scaleFactor);
         
-        ctx.beginPath();
-        ctx.arc(dotX, dY, 3 * scaleFactor, 0, 2 * Math.PI);
-        ctx.fillStyle = color;
-        ctx.fill();
+        const startDotX = x + (numClust > 0 ? 115 : 120) * scaleFactor;
+        for (let i = 0; i < Math.min(numClust, 8); i++) {
+            const color = getNetworkNodeColor(selectedTheme, i, isDarkTheme);
+            const dotX = startDotX + i * spacing;
+            
+            ctx.beginPath();
+            ctx.arc(dotX, dY, 3 * scaleFactor, 0, 2 * Math.PI);
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+        
+        if (hasNoise) {
+            const noiseDotX = startDotX + Math.min(numClust, 8) * spacing + 6 * scaleFactor;
+            ctx.beginPath();
+            ctx.arc(noiseDotX, dY, 3 * scaleFactor, 0, 2 * Math.PI);
+            ctx.fillStyle = isDarkTheme ? '#64748b' : '#94a3b8';
+            ctx.fill();
+            ctx.strokeStyle = isDarkTheme ? '#cbd5e1' : '#475569';
+            ctx.lineWidth = 1 * scaleFactor;
+            ctx.setLineDash([2 * scaleFactor, 2 * scaleFactor]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillText("外れ値", noiseDotX + 6 * scaleFactor, dY - 4 * scaleFactor);
+        }
+    } else {
+        ctx.fillText("色:クラスター (C1-C8)", x + 10 * scaleFactor, dY - 4 * scaleFactor);
+        for (let i = 0; i < Math.min(k, 8); i++) {
+            const color = getNetworkNodeColor(selectedTheme, i, isDarkTheme);
+            const dotX = x + 115 * scaleFactor + i * spacing;
+            
+            ctx.beginPath();
+            ctx.arc(dotX, dY, 3 * scaleFactor, 0, 2 * Math.PI);
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
     }
     
     ctx.restore();
@@ -5877,10 +6228,15 @@ function drawUMAPOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThe
     const minCount = Math.min(...counts);
     const maxCount = Math.max(...counts);
     
-    const k = (umapUserManual && umapUserK) ? umapUserK : (umapOptimalK || parseInt(clusterCount?.value) || 3);
-    const clusterPoints = Array.from({ length: k }, () => []);
+    const isDbscan = (clusterMethod === 'dbscan');
+    const validClusters = points.map(p => p.cluster).filter(c => c >= 0);
+    const maxClusterId = validClusters.length > 0 ? Math.max(...validClusters) : -1;
+    const numClusters = isDbscan 
+        ? (maxClusterId + 1) 
+        : ((umapUserManual && umapUserK) ? umapUserK : (umapOptimalK || parseInt(clusterCount?.value) || 3));
+    const clusterPoints = Array.from({ length: Math.max(1, numClusters) }, () => []);
     points.forEach(p => {
-        if (p.cluster >= 0 && p.cluster < k) {
+        if (p.cluster >= 0 && p.cluster < clusterPoints.length) {
             clusterPoints[p.cluster].push(p);
         }
     });
@@ -5930,18 +6286,29 @@ function drawUMAPOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThe
             radius = 5 + ((p.count - minCount) / (maxCount - minCount)) * 14;
         }
         
-        const color = getNetworkNodeColor(selectedTheme, p.cluster, isDarkTheme);
+        const isNoise = (p.cluster === -1);
+        const color = isNoise
+            ? (isDarkTheme ? '#64748b' : '#94a3b8')
+            : getNetworkNodeColor(selectedTheme, p.cluster, isDarkTheme);
         
         ctx.beginPath();
         ctx.arc(px, py, radius * scaleFactor, 0, 2 * Math.PI);
         ctx.fillStyle = color;
         ctx.fill();
         
-        ctx.strokeStyle = selectedTheme === 'pure-bw' 
-            ? '#000000' 
-            : (isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.3)');
-        ctx.lineWidth = 1.5 * scaleFactor;
+        ctx.strokeStyle = isNoise
+            ? (isDarkTheme ? '#cbd5e1' : '#475569')
+            : (selectedTheme === 'pure-bw' 
+                ? '#000000' 
+                : (isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.3)'));
+        ctx.lineWidth = (isNoise ? 2 : 1.5) * scaleFactor;
+        if (isNoise) {
+            ctx.setLineDash([3 * scaleFactor, 3 * scaleFactor]);
+        } else {
+            ctx.setLineDash([]);
+        }
         ctx.stroke();
+        ctx.setLineDash([]);
         
         const baseFontSize = (networkFontSizeRange && networkFontSizeRange.value) ? parseInt(networkFontSizeRange.value, 10) : 15;
         const fontSizePx = Math.round(baseFontSize * scaleFactor);
@@ -5957,11 +6324,13 @@ function drawUMAPOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThe
         ctx.lineJoin = 'round';
         ctx.strokeText(p.word, px, labelY);
         
-        ctx.fillStyle = isDarkTheme ? '#F3F4F6' : '#111111';
+        ctx.fillStyle = isNoise
+            ? (isDarkTheme ? '#94a3b8' : '#64748b')
+            : (isDarkTheme ? '#F3F4F6' : '#111111');
         ctx.fillText(p.word, px, labelY);
     });
 
-    drawUMAPLegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, k, selectedTheme, selectedFont);
+    drawUMAPLegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, numClusters, selectedTheme, selectedFont, isDbscan, umapDbscanStats);
 }
 
 // 5. Draw Word Cloud, Canvas Bar Chart, Co-occurrence Network, or PCA Scatter Plot
@@ -6474,16 +6843,27 @@ function renderAnalysisSummary(mode, filteredList) {
 
     } else if (mode === 'pca') {
         // ① PCA用コメント
-        const currentK = (pcaUserManual && pcaUserK) ? pcaUserK : (pcaOptimalK || parseInt(clusterCount?.value) || 3);
-        const optK = pcaOptimalK || 3;
-        const recText = pcaUserManual && pcaUserK !== optK ? `（手動調整中 / 初期推奨値: ${optK}）` : `（分布から自動算出した推奨値: ${optK}）`;
-        commentHtml = `
-            <b>📊 この結果から読み取れること：</b><br>
-            近くに配置された語ほど<b>似た文脈で使われる語</b>です。
-            ${currentK}色のグループに分類されています${recText}。<br>
-            横軸(PC1)・縦軸(PC2)はそれぞれ回答全体の傾向をまとめた「主な方向性」を表します
-            （寄与率が低くても、テキスト分析では正常です）。<br>
-            <span style="color:var(--text-muted);">💡 点が離れているほど、他と違う文脈で使われる語です。共起ネットワークと合わせて見ると理解が深まります。</span>`;
+        if (clusterMethod === 'dbscan') {
+            const stats = pcaDbscanStats || { numClusters: 0, numNoise: 0 };
+            commentHtml = `
+                <b>📊 この結果から読み取れること（DBSCAN密度クラスタリング）：</b><br>
+                探索半径 eps = <b>${dbscanEps.toFixed(2)}</b>、最小点数 MinPts = <b>${dbscanMinPts}</b> により、
+                <b>${stats.numClusters}個のクラスター</b> と <b>${stats.numNoise}件の外れ値（ノイズ）</b> を検出しました。<br>
+                密集して使われる単語群のみがグループ化され、孤立した語は外れ値として分離されています。<br>
+                横軸(PC1)・縦軸(PC2)はそれぞれ回答全体の傾向をまとめた主な方向性を表します。<br>
+                <span style="color:var(--text-muted);">💡 探索半径(eps)を広げるとクラスタが結合し、狭めるとより細かく分解またはノイズが増加します。</span>`;
+        } else {
+            const currentK = (pcaUserManual && pcaUserK) ? pcaUserK : (pcaOptimalK || parseInt(clusterCount?.value) || 3);
+            const optK = pcaOptimalK || 3;
+            const recText = pcaUserManual && pcaUserK !== optK ? `（手動調整中 / 初期推奨値: ${optK}）` : `（分布から自動算出した推奨値: ${optK}）`;
+            commentHtml = `
+                <b>📊 この結果から読み取れること：</b><br>
+                近くに配置された語ほど<b>似た文脈で使われる語</b>です。
+                ${currentK}色のグループに分類されています${recText}。<br>
+                横軸(PC1)・縦軸(PC2)はそれぞれ回答全体の傾向をまとめた「主な方向性」を表します
+                （寄与率が低くても、テキスト分析では正常です）。<br>
+                <span style="color:var(--text-muted);">💡 点が離れているほど、他と違う文脈で使われる語です。共起ネットワークと合わせて見ると理解が深まります。</span>`;
+        }
         nextHtml = `
             <b>👉 次のステップ：</b>
             <span style="color:var(--accent-blue);cursor:pointer;text-decoration:underline;" onclick="document.getElementById('display-type').value='topic-lda';document.getElementById('display-type').dispatchEvent(new Event('change'));">トピック分析(LDA)</span>
@@ -6491,15 +6871,24 @@ function renderAnalysisSummary(mode, filteredList) {
 
     } else if (mode === 'umap') {
         // ① UMAP用コメント
-        const currentK = (umapUserManual && umapUserK) ? umapUserK : (umapOptimalK || parseInt(clusterCount?.value) || 3);
-        const optK = umapOptimalK || 3;
-        const recText = umapUserManual && umapUserK !== optK ? `（手動調整中 / 初期推奨値: ${optK}）` : `（分布から自動算出した推奨値: ${optK}）`;
-        commentHtml = `
-            <b>📊 この結果から読み取れること：</b><br>
-            非線形多様体学習（UMAP）により、高次元の単語共起関係を圧縮して可視化しています。<br>
-            ぎゅっと集まっている塊は<b>同じ文脈・話題で高頻度に結びつく単語群（テーマの核）</b>です。
-            ${currentK}色のグループに分類されています${recText}。<br>
-            <span style="color:var(--text-muted);">💡 PCA（主成分分析）に比べ、局所的な類似度が強調され、クラスター同士の「隙間・分離」が明確になります。語をクリックすると用例(KWIC)を確認できます。</span>`;
+        if (clusterMethod === 'dbscan') {
+            const stats = umapDbscanStats || { numClusters: 0, numNoise: 0 };
+            commentHtml = `
+                <b>📊 この結果から読み取れること（DBSCAN密度クラスタリング）：</b><br>
+                非線形多様体学習（UMAP）の凝縮された空間において、探索半径 eps = <b>${dbscanEps.toFixed(2)}</b>、最小点数 MinPts = <b>${dbscanMinPts}</b> で分析しました。<br>
+                <b>${stats.numClusters}個の高密度テーマ核</b> と <b>${stats.numNoise}件の外れ値</b> が検出されました。<br>
+                <span style="color:var(--text-muted);">💡 UMAPの局所的なまとまりに対して密度クラスタリングを適用することで、自然な話題グループを自動分離できます。</span>`;
+        } else {
+            const currentK = (umapUserManual && umapUserK) ? umapUserK : (umapOptimalK || parseInt(clusterCount?.value) || 3);
+            const optK = umapOptimalK || 3;
+            const recText = umapUserManual && umapUserK !== optK ? `（手動調整中 / 初期推奨値: ${optK}）` : `（分布から自動算出した推奨値: ${optK}）`;
+            commentHtml = `
+                <b>📊 この結果から読み取れること：</b><br>
+                非線形多様体学習（UMAP）により、高次元の単語共起関係を圧縮して可視化しています。<br>
+                ぎゅっと集まっている塊は<b>同じ文脈・話題で高頻度に結びつく単語群（テーマの核）</b>です。
+                ${currentK}色のグループに分類されています${recText}。<br>
+                <span style="color:var(--text-muted);">💡 PCA（主成分分析）に比べ、局所的な類似度が強調され、クラスター同士の「隙間・分離」が明確になります。語をクリックすると用例(KWIC)を確認できます。</span>`;
+        }
         nextHtml = `
             <b>👉 次のステップ：</b>
             クラスターのテーマが把握できたら、
