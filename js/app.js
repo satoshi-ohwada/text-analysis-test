@@ -143,6 +143,7 @@ const minCountRange = document.getElementById('min-count-range');
 const minCountVal = document.getElementById('min-count-val');
 const maxWordsRange = document.getElementById('max-words-range');
 const maxWordsVal = document.getElementById('max-words-val');
+const maxWordsAllCheck = document.getElementById('max-words-all-check');
 const networkThresholdGroup = document.getElementById('network-threshold-group');
 const networkThresholdRange = document.getElementById('network-threshold-range');
 const networkThresholdVal = document.getElementById('network-threshold-val');
@@ -2458,8 +2459,39 @@ sampleBtn.addEventListener('click', async () => {
     }
 });
 
+function getMaxWords() {
+    if (maxWordsAllCheck && maxWordsAllCheck.checked) {
+        return Infinity;
+    }
+    return parseInt(maxWordsRange.value, 10) || 50;
+}
+
+function updateMaxWordsDisplay() {
+    const isAll = maxWordsAllCheck && maxWordsAllCheck.checked;
+    const minCount = parseInt(minCountRange.value, 10) || 1;
+    const matchingCount = wordFrequencies ? wordFrequencies.filter(item => item.count >= minCount).length : 0;
+
+    const sliderRow = document.getElementById('max-words-slider-row');
+    if (isAll) {
+        maxWordsRange.disabled = true;
+        if (sliderRow) {
+            sliderRow.style.opacity = '0.45';
+            sliderRow.style.pointerEvents = 'none';
+        }
+        maxWordsVal.innerHTML = `<span style="color: var(--accent-blue);">全単語 (${matchingCount}語)</span>`;
+    } else {
+        maxWordsRange.disabled = false;
+        if (sliderRow) {
+            sliderRow.style.opacity = '1';
+            sliderRow.style.pointerEvents = 'auto';
+        }
+        maxWordsVal.innerText = maxWordsRange.value;
+    }
+}
+
 minCountRange.addEventListener('input', (e) => {
     minCountVal.innerText = e.target.value;
+    updateMaxWordsDisplay();
     if (displayType.value === 'network' || displayType.value === 'pca' || displayType.value === 'umap') {
         if (rawTextData) processAndRender();
     } else {
@@ -2468,13 +2500,24 @@ minCountRange.addEventListener('input', (e) => {
 });
 
 maxWordsRange.addEventListener('input', (e) => {
-    maxWordsVal.innerText = e.target.value;
+    updateMaxWordsDisplay();
     if (displayType.value === 'network' || displayType.value === 'pca' || displayType.value === 'umap') {
         if (rawTextData) processAndRender();
     } else {
         updateWordCloud();
     }
 });
+
+if (maxWordsAllCheck) {
+    maxWordsAllCheck.addEventListener('change', () => {
+        updateMaxWordsDisplay();
+        if (displayType.value === 'network' || displayType.value === 'pca' || displayType.value === 'umap') {
+            if (rawTextData) processAndRender();
+        } else {
+            updateWordCloud();
+        }
+    });
+}
 
 if (networkThresholdRange) {
     networkThresholdRange.addEventListener('input', (e) => {
@@ -3123,7 +3166,7 @@ cloudCanvas.addEventListener('mousemove', (e) => {
         const topMargin = 60 * scaleFactor;
         const bottomMargin = 40 * scaleFactor;
         const minCount = parseInt(minCountRange.value);
-        const maxWords = parseInt(maxWordsRange.value);
+        const maxWords = getMaxWords();
         const filteredList = wordFrequencies
             .filter(item => item.count >= minCount)
             .slice(0, Math.min(20, maxWords));
@@ -3284,7 +3327,7 @@ cloudCanvas.addEventListener('click', (e) => {
         const topMargin = 60 * scaleFactor;
         const bottomMargin = 40 * scaleFactor;
         const minCount = parseInt(minCountRange.value);
-        const maxWords = parseInt(maxWordsRange.value);
+        const maxWords = getMaxWords();
         const filteredList = wordFrequencies
             .filter(item => item.count >= minCount)
             .slice(0, Math.min(20, maxWords));
@@ -3386,7 +3429,7 @@ cloudCanvas.addEventListener('dblclick', (e) => {
         const topMargin = 60 * scaleFactor;
         const bottomMargin = 40 * scaleFactor;
         const minCount = parseInt(minCountRange.value);
-        const maxWords = parseInt(maxWordsRange.value);
+        const maxWords = getMaxWords();
         const filteredList = wordFrequencies
             .filter(item => item.count >= minCount)
             .slice(0, Math.min(20, maxWords));
@@ -4757,6 +4800,7 @@ function processAndRender() {
 
     const totalWords = wordFrequencies.reduce((sum, item) => sum + item.count, 0);
     updateStatsBar(opinionLinesCount, totalWords, wordFrequencies.length);
+    updateMaxWordsDisplay();
 
     // --- MINIMUM DATA WARNING (②) ---
     const dataWarningEl = document.getElementById('data-warning');
@@ -4780,8 +4824,9 @@ function processAndRender() {
 
     // --- CO-OCCURRENCE NETWORK PREPARATION ---
     const minCount = parseInt(minCountRange.value);
-    const maxWords = parseInt(maxWordsRange.value);
+    const maxWords = getMaxWords();
     const filteredList = wordFrequencies.filter(item => item.count >= minCount).slice(0, maxWords);
+    const effectiveMaxWords = isFinite(maxWords) ? maxWords : filteredList.length;
     const allowedWordsSet = new Set(filteredList.map(item => item.text));
 
     const finalThreshold = networkThresholdRange ? parseFloat(networkThresholdRange.value) : 0.05;
@@ -4806,8 +4851,8 @@ function processAndRender() {
     
     rawEdges.sort((a, b) => b.weight - a.weight);
     
-    // Limit to exactly 1.0 * maxWords to naturally separate the graph into disjoint communities
-    const topEdges = rawEdges.slice(0, Math.round(maxWords * 1.0));
+    // Limit to exactly 1.0 * effectiveMaxWords to naturally separate the graph into disjoint communities
+    const topEdges = rawEdges.slice(0, Math.round(effectiveMaxWords * 1.0));
 
     // [Proposal 1: 最低1本エッジ保証（救済リンク）]
     const ensureMinEdge = networkMinEdgeCheck ? networkMinEdgeCheck.checked : true;
@@ -4861,8 +4906,8 @@ function processAndRender() {
 
     const networkNodesSet = new Set();
     topEdges.forEach(e => {
-        if (networkNodesSet.size < maxWords) networkNodesSet.add(e.sourceId);
-        if (networkNodesSet.size < maxWords) networkNodesSet.add(e.targetId);
+        if (networkNodesSet.size < effectiveMaxWords) networkNodesSet.add(e.sourceId);
+        if (networkNodesSet.size < effectiveMaxWords) networkNodesSet.add(e.targetId);
     });
 
     networkExcludedWords = filteredList.filter(item => !networkNodesSet.has(item.text));
@@ -7086,7 +7131,7 @@ function updateWordCloud() {
     if (sidebarRelayoutBtn) sidebarRelayoutBtn.disabled = false;
 
     const minCount = parseInt(minCountRange.value);
-    const maxWords = parseInt(maxWordsRange.value);
+    const maxWords = getMaxWords();
     const rankingMethod = document.getElementById('ranking-method').value;
     const currentDisplayType = displayType.value;
     
@@ -7772,7 +7817,7 @@ async function executeImageDownload(sizeKey = 'medium') {
         };
 
         const minCount = parseInt(minCountRange.value);
-        const maxWords = parseInt(maxWordsRange.value);
+        const maxWords = getMaxWords();
         const filteredList = wordFrequencies
             .filter(item => item.count >= minCount)
             .slice(0, maxWords);
