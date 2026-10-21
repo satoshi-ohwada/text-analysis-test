@@ -6990,6 +6990,63 @@ function drawUMAPOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThe
     drawUMAPLegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, numClusters, selectedTheme, selectedFont, clusterMethod, activeUmapStats);
 }
 
+/**
+ * ワードクラウドの単語サイズリストを計算
+ * キャンバスの領域（幅・高さ）、アスペクト比、表示単語数、文字数に応じて
+ * 領域全体をできるだけ大きく埋めるよう動的にフォントサイズをスケーリングします。
+ */
+function computeWordCloudList(filteredList, rankingMethod, canvasWidth, canvasHeight, isCircle = false) {
+    if (!filteredList || filteredList.length === 0) return [];
+
+    const getValue = item => rankingMethod === 'tfidf' ? item.tfidf : item.count;
+    const maxVal = getValue(filteredList[0]);
+    const minVal = getValue(filteredList[filteredList.length - 1]);
+    const numWords = filteredList.length;
+
+    const totalArea = canvasWidth * canvasHeight;
+    const minDim = Math.min(canvasWidth, canvasHeight);
+    // 円形の場合は矩形よりも充填可能領域が狭いためカバレッジ率を調整
+    const targetCoverage = isCircle ? 0.40 : 0.50;
+
+    // 各単語の正規化スコア（0.0〜1.0）と推定文字幅
+    const wordStats = filteredList.map(item => {
+        const val = getValue(item);
+        const norm = maxVal === minVal ? 0.5 : (val - minVal) / (maxVal - minVal);
+        // 指数カーブで中位・下位の語も小さくなりすぎず領域をしっかり埋める
+        const curvedNorm = Math.pow(Math.max(0, norm), 0.65);
+        // 日本語等の文字長（最低1.5文字分相当を確保）
+        const charLen = Math.max(1.5, item.text ? item.text.length : 2);
+        return { item, val, norm: curvedNorm, charLen };
+    });
+
+    // 相対ウェイトの総和から基本サイズ（最大単語のフォントサイズ）を逆算
+    // 各単語のサイズ比: 最上位が 1.0、最下位が約 0.22
+    const relWeightSum = wordStats.reduce((sum, ws) => {
+        const relSize = 0.22 + 0.78 * ws.norm;
+        return sum + ws.charLen * (relSize * relSize);
+    }, 0);
+
+    let baseSize = Math.sqrt((totalArea * targetCoverage) / Math.max(1, relWeightSum));
+
+    // 単一単語が画面をはみ出さないよう上限（キャンバス短辺の38%）を設定
+    const maxFontCap = minDim * 0.38;
+    if (baseSize > maxFontCap) {
+        baseSize = maxFontCap;
+    }
+    // 単語数に応じた最低限のベースサイズを維持
+    const minBaseSize = Math.max(26, (minDim * 0.16) * Math.sqrt(40 / Math.max(40, numWords)));
+    if (baseSize < minBaseSize) {
+        baseSize = minBaseSize;
+    }
+
+    const minFontSize = Math.max(10, Math.round(baseSize * 0.22));
+
+    return wordStats.map(ws => {
+        let weight = Math.round(minFontSize + ws.norm * (baseSize - minFontSize));
+        return [ws.item.text, weight, ws.item.count, ws.item.tfidf];
+    });
+}
+
 // 5. Draw Word Cloud, Canvas Bar Chart, Co-occurrence Network, or PCA Scatter Plot
 function updateWordCloud() {
     if (typeof tooltip !== 'undefined' && tooltip) {
@@ -7067,24 +7124,11 @@ function updateWordCloud() {
         if (ldaContainer) ldaContainer.style.display = 'none';
         if (collocationContainer) collocationContainer.style.display = 'none';
         
-        const getValue = item => rankingMethod === 'tfidf' ? item.tfidf : item.count;
-        const maxVal = getValue(filteredList[0]);
-        const minVal = getValue(filteredList[filteredList.length - 1]);
-        
-        const list = filteredList.map(item => {
-            let weight = 12;
-            const val = getValue(item);
-            if (maxVal !== minVal) {
-                weight = 14 + Math.round(((val - minVal) / (maxVal - minVal)) * 60);
-            } else {
-                weight = 32;
-            }
-            return [item.text, weight, item.count, item.tfidf];
-        });
-
         const selectedFont = fontSelect.value;
         const drawShape = shapeCircle.checked ? 'circle' : 'square';
         const isRotate = rotateText.checked;
+
+        const list = computeWordCloudList(filteredList, rankingMethod, cloudCanvas.width, cloudCanvas.height, drawShape === 'circle');
 
         // Custom double-click check in cloud click callback
         let lastClickedWord = null;
@@ -7142,7 +7186,7 @@ function updateWordCloud() {
 
         WordCloud(cloudCanvas, {
             list: list,
-            gridSize: Math.round(16 * cloudCanvas.width / 1024),
+            gridSize: Math.max(4, Math.min(8, Math.round(5 * (cloudCanvas.width / 1024)))),
             weightFactor: 1,
             fontFamily: selectedFont,
             color: wordColorFunc,
@@ -7150,9 +7194,10 @@ function updateWordCloud() {
             rotationSteps: 2,
             backgroundColor: 'transparent',
             shape: drawShape,
-            ellipticity: 0.65,
+            ellipticity: drawShape === 'circle' ? 1.0 : Math.min(1.0, Math.max(0.35, cloudCanvas.height / cloudCanvas.width)),
             shuffle: false,
             drawOutOfBound: false,
+            shrinkToFit: true,
             hover: function(item, dimension, event) {
                 if (displayType.value !== 'cloud') return;
                 if (!item) {
@@ -7767,21 +7812,7 @@ async function executeImageDownload(sizeKey = 'medium') {
             const drawShape = shapeCircle.checked ? 'circle' : 'square';
             const isRotate = rotateText.checked;
             
-            const scaleFactor = targetSize.w / cloudCanvas.width;
-            const getValue = item => rankingMethod === 'tfidf' ? item.tfidf : item.count;
-            const maxVal = getValue(filteredList[0]);
-            const minVal = getValue(filteredList[filteredList.length - 1]);
-            
-            const list = filteredList.map(item => {
-                let weight = 12;
-                const val = getValue(item);
-                if (maxVal !== minVal) {
-                    weight = 14 + Math.round(((val - minVal) / (maxVal - minVal)) * 60);
-                } else {
-                    weight = 32;
-                }
-                return [item.text, weight * scaleFactor, item.count, item.tfidf];
-            });
+            const list = computeWordCloudList(filteredList, rankingMethod, exportCanvas.width, exportCanvas.height, drawShape === 'circle');
 
             const cloudColorMode = document.getElementById('cloud-color-mode') ? document.getElementById('cloud-color-mode').value : 'random';
             let wordColorFunc = getColorScheme(selectedTheme, isDarkTheme);
@@ -7810,7 +7841,7 @@ async function executeImageDownload(sizeKey = 'medium') {
 
             WordCloud(exportCanvas, {
                 list: list,
-                gridSize: Math.round(16 * exportCanvas.width / 1024),
+                gridSize: Math.max(4, Math.min(8, Math.round(5 * (exportCanvas.width / 1024)))),
                 weightFactor: 1,
                 fontFamily: selectedFont,
                 color: wordColorFunc,
@@ -7818,9 +7849,10 @@ async function executeImageDownload(sizeKey = 'medium') {
                 rotationSteps: 2,
                 backgroundColor: isDarkTheme ? '#0B0F19' : '#FFFFFF',
                 shape: drawShape,
-                ellipticity: 0.65,
+                ellipticity: drawShape === 'circle' ? 1.0 : Math.min(1.0, Math.max(0.35, exportCanvas.height / exportCanvas.width)),
                 shuffle: false,
-                drawOutOfBound: false
+                drawOutOfBound: false,
+                shrinkToFit: true
             });
 
             exportCanvas.addEventListener('wordcloudstop', () => {
