@@ -2443,7 +2443,10 @@ function handleFile(file) {
 sampleBtn.addEventListener('click', async () => {
     fileInfo.innerText = "デモデータ読み込み中...";
     try {
-        const res = await fetch('data/sample.txt');
+        let res = await fetch('data/sample/sample.txt');
+        if (!res.ok) {
+            res = await fetch('data/sample.txt');
+        }
         if (!res.ok) throw new Error('Failed to load sample data');
         const text = await res.text();
         fileInfo.innerText = "デモデータ適用中";

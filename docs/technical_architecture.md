@@ -31,7 +31,8 @@ wordcloud_app/
 │   └── wordcloud2/  wordcloud2.min.js
 ├── data/            【一部必須】
 │   ├── stopwords.txt         【必須】システムのデフォルト除外ワード辞書
-│   └── sample_opinions.txt等 【非必須】ユーザーが配置したサンプルデータ群
+│   ├── custom_rules.txt      【任意】カスタム解析ルール（追加形態素・除外・表記ゆれ）
+│   └── sample/               【非必須】ユーザーが配置したサンプルデータ群（sample.txt等）
 ├── assets/          【必須】
 │   └── fonts/       フォントファイル等の静的アセット
 ├── kidou.bat        【必須】ローカル環境でCORS制約を回避してブラウザを起動するバッチファイル
