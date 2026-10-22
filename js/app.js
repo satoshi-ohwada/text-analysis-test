@@ -7847,65 +7847,25 @@ async function executeImageDownload(sizeKey = 'medium') {
             ctx.fillStyle = isDarkTheme ? '#0B0F19' : '#FFFFFF';
             ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
             
-            setBtnExporting();
+            // 画面に表示されているワードクラウド(cloudCanvas)をアスペクト比維持・十分な安全マージン付きで中央配置して描画
+            // これにより、画面上の綺麗なレイアウト・単語配置・角度・配色を100%忠実に保存し、
+            // 別サイズでの再計算・再描画による端の文字欠けや配置ズレを完全に防止
+            const margin = Math.round(Math.min(targetSize.w, targetSize.h) * 0.04); // 4%の安全余白
+            const availW = targetSize.w - margin * 2;
+            const availH = targetSize.h - margin * 2;
+            const scale = Math.min(availW / cloudCanvas.width, availH / cloudCanvas.height);
             
-            const exportTimeout = setTimeout(() => {
-                restoreBtn();
-            }, 8000);
+            const drawW = cloudCanvas.width * scale;
+            const drawH = cloudCanvas.height * scale;
+            const drawX = (targetSize.w - drawW) / 2;
+            const drawY = (targetSize.h - drawH) / 2;
             
-            const selectedFont = fontSelect.value;
-            const drawShape = shapeCircle.checked ? 'circle' : 'square';
-            const isRotate = rotateText.checked;
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(cloudCanvas, drawX, drawY, drawW, drawH);
             
-            const list = computeWordCloudList(filteredList, rankingMethod, exportCanvas.width, exportCanvas.height, drawShape === 'circle');
-
-            const cloudColorMode = document.getElementById('cloud-color-mode') ? document.getElementById('cloud-color-mode').value : 'random';
-            let wordColorFunc = getColorScheme(selectedTheme, isDarkTheme);
-            
-            if (cloudColorMode === 'cluster') {
-                const topWordsForCluster = filteredList.map(item => item.text);
-                try {
-                    const clusterResult = findOptimalWordClusters(topWordsForCluster, currentAnalysisCoocCounts, 10);
-                    wordColorFunc = function(itemOrWord) {
-                        let wordStr = '';
-                        if (typeof itemOrWord === 'string') wordStr = itemOrWord;
-                        else if (Array.isArray(itemOrWord)) wordStr = itemOrWord[0];
-                        else if (itemOrWord && itemOrWord.text) wordStr = itemOrWord.text;
-                        
-                        const idx = topWordsForCluster.indexOf(wordStr);
-                        if (idx !== -1) {
-                            const clusterId = clusterResult.assignments[idx];
-                            return getNetworkNodeColor(selectedTheme, { word: wordStr, cluster: clusterId }, isDarkTheme);
-                        }
-                        return '#999999';
-                    };
-                } catch(e) {
-                    console.error("Clustering error during export:", e);
-                }
-            }
-
-            WordCloud(exportCanvas, {
-                list: list,
-                gridSize: Math.max(4, Math.min(8, Math.round(5 * (exportCanvas.width / 1024)))),
-                weightFactor: 1,
-                fontFamily: selectedFont,
-                color: wordColorFunc,
-                rotateRatio: isRotate ? 0.35 : 0,
-                rotationSteps: 2,
-                backgroundColor: isDarkTheme ? '#0B0F19' : '#FFFFFF',
-                shape: drawShape,
-                ellipticity: drawShape === 'circle' ? 1.0 : Math.min(1.0, Math.max(0.35, exportCanvas.height / exportCanvas.width)),
-                shuffle: false,
-                drawOutOfBound: false,
-                shrinkToFit: true
-            });
-
-            exportCanvas.addEventListener('wordcloudstop', () => {
-                clearTimeout(exportTimeout);
-                const image = exportCanvas.toDataURL("image/png");
-                saveImageFile(image, 'wordcloud.png');
-                restoreBtn();
-            });
+            const image = exportCanvas.toDataURL("image/png");
+            await saveImageFile(image, 'wordcloud.png');
         } else if (currentMode === 'chart') {
             const exportCanvas = document.createElement('canvas');
             exportCanvas.width = targetSize.w;
