@@ -2698,6 +2698,15 @@ function updateClusterCountGroupVisibility() {
         }
     }
 
+    const cloudOptionsGroup = document.getElementById('cloud-options-group');
+    if (cloudOptionsGroup) {
+        if (displayType && displayType.value === 'cloud') {
+            cloudOptionsGroup.style.display = 'flex';
+        } else {
+            cloudOptionsGroup.style.display = 'none';
+        }
+    }
+
     const chartColorGroup = document.getElementById('chart-color-mode-group');
     if (chartColorGroup) {
         if (displayType && displayType.value === 'chart') {
@@ -4301,7 +4310,7 @@ function findOptimal2DClusterK(points, minK = 2, maxK = 6) {
             }
         }
         const ssw = Math.max(1e-10, inertia);
-        const chScore = (ssb / (k - 1)) / (ssw / (n - k));
+        const chScore = (n > k && k > 1) ? (ssb / (k - 1)) / (ssw / (n - k)) : 0;
 
         // 3. Davies-Bouldin Index
         const dispersions = new Float64Array(k);
@@ -4382,6 +4391,7 @@ function downloadCSV(filename, csvContent) {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 }
 
@@ -4770,7 +4780,8 @@ function processAndRender() {
     wordFrequencies = Object.entries(counts)
         .map(([text, count]) => {
             const df = docFreq[text] || 1;
-            const idf = Math.log(opinionLinesCount / df) + 1;
+            const totalDocs = Math.max(1, opinionLinesCount);
+            const idf = Math.log(totalDocs / df) + 1;
             const tfidf = count * idf;
             return { text, count, tfidf, pos: wordPosMap[text] || '名詞' };
         });
@@ -4791,7 +4802,7 @@ function processAndRender() {
 
     if (wordFrequencies.length > 0) {
         const maxDataCount = Math.max(...wordFrequencies.map(w => w.count));
-        minCountRange.max = maxDataCount;
+        minCountRange.max = Math.max(1, maxDataCount);
         if (parseInt(minCountRange.value) > maxDataCount) {
             minCountRange.value = maxDataCount;
             minCountVal.innerText = maxDataCount;
@@ -5138,6 +5149,8 @@ function processAndRender() {
         pcaPoints = [];
         rawUmapPoints = [];
         umapPoints = [];
+        pcaExplainedVar1 = '--';
+        pcaExplainedVar2 = '--';
     }
 
     // --- LDA TOPIC MODELING & AUTOMATIC TOPIC NUMBER SELECTION ---
@@ -7877,7 +7890,7 @@ async function executeImageDownload(sizeKey = 'medium') {
             drawBarChartOnCanvas(exportCanvas, chartList, rankingMethod, selectedTheme, selectedFont, isDarkTheme);
             
             const image = exportCanvas.toDataURL("image/png");
-            saveImageFile(image, 'barchart.png');
+            await saveImageFile(image, 'barchart.png');
         } else if (currentMode === 'network') {
             const exportCanvas = document.createElement('canvas');
             exportCanvas.width = targetSize.w;
@@ -7907,7 +7920,7 @@ async function executeImageDownload(sizeKey = 'medium') {
                     const srcNode = clonedNodes.find(n => n.id === edge.source.id);
                     const tgtNode = clonedNodes.find(n => n.id === edge.target.id);
                     if (srcNode && tgtNode) {
-                        clonedEdges.push({ source: srcNode, target: tgtNode, weight: edge.weight });
+                        clonedEdges.push({ source: srcNode, target: tgtNode, weight: edge.weight, isRescueEdge: !!edge.isRescueEdge });
                     }
                 }
             });
@@ -7917,7 +7930,7 @@ async function executeImageDownload(sizeKey = 'medium') {
             drawNetworkOnCanvas(exportCanvas, clonedNodes, clonedEdges, selectedTheme, selectedFont, isDarkTheme, customScale);
 
             const image = exportCanvas.toDataURL("image/png");
-            saveImageFile(image, 'network_diagram.png');
+            await saveImageFile(image, 'network_diagram.png');
         } else if (currentMode === 'pca') {
             const exportCanvas = document.createElement('canvas');
             exportCanvas.width = targetSize.w;
@@ -7927,7 +7940,7 @@ async function executeImageDownload(sizeKey = 'medium') {
             drawPCAOnCanvas(exportCanvas, pcaPoints, selectedTheme, selectedFont, isDarkTheme);
 
             const image = exportCanvas.toDataURL("image/png");
-            saveImageFile(image, 'pca_scatter.png');
+            await saveImageFile(image, 'pca_scatter.png');
         } else if (currentMode === 'umap') {
             const exportCanvas = document.createElement('canvas');
             exportCanvas.width = targetSize.w;
@@ -7937,7 +7950,7 @@ async function executeImageDownload(sizeKey = 'medium') {
             drawUMAPOnCanvas(exportCanvas, umapPoints, selectedTheme, selectedFont, isDarkTheme);
 
             const image = exportCanvas.toDataURL("image/png");
-            saveImageFile(image, 'umap_scatter.png');
+            await saveImageFile(image, 'umap_scatter.png');
         } else if (currentMode === 'topic-lda' || currentMode === 'collocation') {
             const targetContainer = currentMode === 'collocation' ? collocationContainer : ldaContainer;
             if (!targetContainer) return;
@@ -7959,14 +7972,14 @@ async function executeImageDownload(sizeKey = 'medium') {
                     backgroundColor: isDarkTheme ? '#0B0F19' : '#FFFFFF',
                     scale: 2,
                     windowHeight: targetContainer.scrollHeight
-                }).then(canvas => {
+                }).then(async canvas => {
                     // Restore original styles
                     targetContainer.style.height = originalHeight;
                     targetContainer.style.overflowY = originalOverflow;
                     targetContainer.style.position = originalPosition;
 
                     const image = canvas.toDataURL("image/png");
-                    saveImageFile(image, targetFilename);
+                    await saveImageFile(image, targetFilename);
                     
                     restoreBtn();
                 }).catch(error => {
@@ -8082,6 +8095,7 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
         kwicExtraHeader.innerHTML = '';
     }
 
+    kwicOverlay.style.display = 'flex';
     kwicTbody.innerHTML = '';
     
     let matchCount = 0;
