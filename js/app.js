@@ -2622,8 +2622,21 @@ const redrawElements = [colorTheme, fontSelect, shapeCircle, rotateText];
 if (cloudColorModeSelect) redrawElements.push(cloudColorModeSelect);
 if (chartColorModeSelect) redrawElements.push(chartColorModeSelect);
 
+// Ensure selected font is loaded dynamically on demand before canvas redraw
+async function ensureFontLoaded(fontValue) {
+    if (!document.fonts || !document.fonts.load) return;
+    try {
+        await document.fonts.load(`16px ${fontValue}`);
+    } catch (e) {
+        console.warn('Font load error:', e);
+    }
+}
+
 redrawElements.forEach(elem => {
-    elem.addEventListener('change', () => {
+    elem.addEventListener('change', async () => {
+        if (elem === fontSelect && fontSelect.value) {
+            await ensureFontLoaded(fontSelect.value);
+        }
         if (rawTextData) {
             updateWordCloud();
         }
@@ -8063,6 +8076,7 @@ function startApp() {
     if (networkFontSizeRange && networkFontSizeVal) {
         networkFontSizeVal.innerText = `${networkFontSizeRange.value}px`;
     }
+    ensureFontLoaded(fontSelect ? fontSelect.value : "'Noto Sans JP', sans-serif");
 }
 
 if (document.readyState === 'loading') {
@@ -8306,7 +8320,7 @@ function openKWICModal(word, count, extraHeaderHtml = null) {
             
             const selectedTheme = document.getElementById('color-theme') ? document.getElementById('color-theme').value : 'default';
             const isDarkTheme = document.documentElement.getAttribute('data-theme') === 'dark';
-            const selectedFont = fontSelect ? fontSelect.value : "'BIZ UDP Gothic', sans-serif";
+            const selectedFont = fontSelect ? fontSelect.value : "'Noto Sans JP', sans-serif";
             
             // Build Nodes
             let miniNodes = [{

@@ -153,7 +153,7 @@ text-analysis-test/
 ├── css/                  # スタイルシート (styles.css)
 ├── js/                   # メインロジック (app.js)
 ├── assets/               # 静的アセット
-│   ├── fonts/            # フォントファイル (BIZ UDPゴシック/明朝)
+│   ├── fonts/            # フォントファイル (Noto Sans JP / Zen Maru Gothic / Zen Kurenaido / BIZ UDP)
 │   └── icons/            # アイコン・favicon画像
 ├── docs/                 # ドキュメント・チュートリアル
 │   ├── images/           # マニュアル用スクリーンショット画像
