@@ -2491,9 +2491,25 @@ function updateMaxWordsDisplay() {
     }
 }
 
+let wordCloudDebounceTimer = null;
+function debouncedUpdateWordCloud(delay = 120) {
+    if (wordCloudDebounceTimer) clearTimeout(wordCloudDebounceTimer);
+    wordCloudDebounceTimer = setTimeout(() => {
+        updateWordCloud();
+    }, delay);
+}
+
 minCountRange.addEventListener('input', (e) => {
     minCountVal.innerText = e.target.value;
     updateMaxWordsDisplay();
+    if (displayType.value === 'network' || displayType.value === 'pca' || displayType.value === 'umap') {
+        if (rawTextData) processAndRender();
+    } else {
+        debouncedUpdateWordCloud(120);
+    }
+});
+minCountRange.addEventListener('change', () => {
+    if (wordCloudDebounceTimer) clearTimeout(wordCloudDebounceTimer);
     if (displayType.value === 'network' || displayType.value === 'pca' || displayType.value === 'umap') {
         if (rawTextData) processAndRender();
     } else {
@@ -2503,6 +2519,14 @@ minCountRange.addEventListener('input', (e) => {
 
 maxWordsRange.addEventListener('input', (e) => {
     updateMaxWordsDisplay();
+    if (displayType.value === 'network' || displayType.value === 'pca' || displayType.value === 'umap') {
+        if (rawTextData) processAndRender();
+    } else {
+        debouncedUpdateWordCloud(120);
+    }
+});
+maxWordsRange.addEventListener('change', () => {
+    if (wordCloudDebounceTimer) clearTimeout(wordCloudDebounceTimer);
     if (displayType.value === 'network' || displayType.value === 'pca' || displayType.value === 'umap') {
         if (rawTextData) processAndRender();
     } else {
@@ -7432,6 +7456,11 @@ function updateWordCloud() {
         tooltip.style.display = 'none';
     }
 
+    // 0. 前回の WordCloud 描画非同期ループが実行中の場合は即座に強制停止し、多重実行による文字重なり・ゴースト描画を完全に防止
+    if (typeof WordCloud !== 'undefined' && typeof WordCloud.stop === 'function') {
+        WordCloud.stop();
+    }
+
     if (networkAnimationFrameId) {
         cancelAnimationFrame(networkAnimationFrameId);
         networkAnimationFrameId = null;
@@ -7514,6 +7543,22 @@ function updateWordCloud() {
         const drawShape = shapeCircle.checked ? 'circle' : 'square';
         const isRotate = rotateText.checked;
 
+        // フォントが未解決のまま描画されて文字幅・衝突判定が狂うのを防ぐため、未ロードなら確実に待機してから描画
+        if (document.fonts && document.fonts.check && !document.fonts.check(`16px ${selectedFont}`)) {
+            ensureFontLoaded(selectedFont).then(() => {
+                if (displayType && displayType.value === 'cloud') {
+                    updateWordCloud();
+                }
+            });
+            return;
+        }
+
+        // キャンバスをクリア
+        const ctx = cloudCanvas.getContext('2d');
+        if (ctx) {
+            ctx.clearRect(0, 0, cloudCanvas.width, cloudCanvas.height);
+        }
+
         const list = computeWordCloudList(filteredList, rankingMethod, cloudCanvas.width, cloudCanvas.height, drawShape === 'circle');
 
         // Custom double-click check in cloud click callback
@@ -7575,11 +7620,12 @@ function updateWordCloud() {
             gridSize: Math.max(4, Math.min(8, Math.round(5 * (cloudCanvas.width / 1024)))),
             weightFactor: 1,
             fontFamily: selectedFont,
-            fontWeight: selectedFont.includes('Zen Maru Gothic') ? 500 : 'normal',
+            fontWeight: selectedFont.includes('Zen Maru Gothic') ? 500 : (selectedFont.includes('BIZ UDP') ? 700 : 'normal'),
             color: wordColorFunc,
             rotateRatio: isRotate ? 0.35 : 0,
             rotationSteps: 2,
             backgroundColor: 'transparent',
+            clearCanvas: true,
             shape: drawShape,
             ellipticity: drawShape === 'circle' ? 1.0 : Math.min(1.0, Math.max(0.35, cloudCanvas.height / cloudCanvas.width)),
             shuffle: false,
