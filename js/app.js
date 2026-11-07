@@ -6637,20 +6637,24 @@ function drawScatterPointsAndLabels(ctx, points, scaleX, scaleY, canvasWidth, ca
     if (isRepelEnabled) {
         ctx.save();
         ctx.lineWidth = 1 * scaleFactor;
+        const minLeaderLineLength = 12 * scaleFactor; // 短すぎる引き出し線は引かない閾値（ggrepelのmin.segment.length相当）
         labelDataList.forEach(lbl => {
             const dx = lbl.x - lbl.px;
             const dy = lbl.y - lbl.py;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            // 元の位置（アンカー）から一定以上離れた場合に引き出し線を描画
-            const threshold = lbl.r + 7 * scaleFactor;
-            if (dist > threshold) {
-                const angle = Math.atan2(dy, dx);
-                const startX = lbl.px + Math.cos(angle) * (lbl.r + 2 * scaleFactor);
-                const startY = lbl.py + Math.sin(angle) * (lbl.r + 2 * scaleFactor);
 
-                const endX = Math.max(lbl.x - lbl.w / 2 + 3 * scaleFactor, Math.min(lbl.x + lbl.w / 2 - 3 * scaleFactor, startX));
-                const endY = Math.max(lbl.y - lbl.h / 2 + 2 * scaleFactor, Math.min(lbl.y + lbl.h / 2 - 2 * scaleFactor, startY));
+            const angle = Math.atan2(dy, dx);
+            const startX = lbl.px + Math.cos(angle) * (lbl.r + 2 * scaleFactor);
+            const startY = lbl.py + Math.sin(angle) * (lbl.r + 2 * scaleFactor);
 
+            const endX = Math.max(lbl.x - lbl.w / 2 + 3 * scaleFactor, Math.min(lbl.x + lbl.w / 2 - 3 * scaleFactor, startX));
+            const endY = Math.max(lbl.y - lbl.h / 2 + 2 * scaleFactor, Math.min(lbl.y + lbl.h / 2 - 2 * scaleFactor, startY));
+
+            const lineDx = endX - startX;
+            const lineDy = endY - startY;
+            const lineLen = Math.sqrt(lineDx * lineDx + lineDy * lineDy);
+
+            // 実際の線の長さが閾値（12px）以上離れている場合のみ引き出し線を描画
+            if (lineLen >= minLeaderLineLength) {
                 ctx.beginPath();
                 ctx.moveTo(startX, startY);
                 ctx.lineTo(endX, endY);
