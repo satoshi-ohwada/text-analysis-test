@@ -152,6 +152,8 @@ const networkMinEdgeCheck = document.getElementById('network-min-edge-check');
 const diagramLabelSizeGroup = document.getElementById('diagram-label-size-group');
 const networkFontSizeRange = document.getElementById('network-font-size-range');
 const networkFontSizeVal = document.getElementById('network-font-size-val');
+const scatterRepelContainer = document.getElementById('scatter-repel-container');
+const scatterRepelCheck = document.getElementById('scatter-repel-check');
 const colorTheme = document.getElementById('color-theme');
 const fontSelect = document.getElementById('font-select');
 const shapeCircle = document.getElementById('shape-circle');
@@ -2624,6 +2626,7 @@ const chartColorModeSelect = document.getElementById('chart-color-mode');
 const redrawElements = [colorTheme, fontSelect, shapeCircle, rotateText];
 if (cloudColorModeSelect) redrawElements.push(cloudColorModeSelect);
 if (chartColorModeSelect) redrawElements.push(chartColorModeSelect);
+if (scatterRepelCheck) redrawElements.push(scatterRepelCheck);
 
 // Ensure selected font is loaded dynamically on demand before canvas redraw
 async function ensureFontLoaded(fontValue) {
@@ -2745,6 +2748,14 @@ function updateClusterCountGroupVisibility() {
             diagramLabelSizeGroup.style.display = 'block';
         } else {
             diagramLabelSizeGroup.style.display = 'none';
+        }
+    }
+
+    if (scatterRepelContainer) {
+        if (displayType && ['pca', 'umap'].includes(displayType.value)) {
+            scatterRepelContainer.style.display = 'block';
+        } else {
+            scatterRepelContainer.style.display = 'none';
         }
     }
 
@@ -3330,7 +3341,11 @@ cloudCanvas.addEventListener('mousemove', (e) => {
             }
             
             const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist <= radius * (cloudCanvas.width / 1024) + 8) {
+            const isPointHit = dist <= radius * (cloudCanvas.width / 1024) + 8;
+            const isLabelHit = pt._labelBox &&
+                mouseX >= pt._labelBox.x && mouseX <= pt._labelBox.x + pt._labelBox.w &&
+                mouseY >= pt._labelBox.y && mouseY <= pt._labelBox.y + pt._labelBox.h;
+            if (isPointHit || isLabelHit) {
                 hoveredPoint = pt;
                 break;
             }
@@ -3444,7 +3459,11 @@ cloudCanvas.addEventListener('click', (e) => {
             }
             
             const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist <= radius * (cloudCanvas.width / 1024) + 8) {
+            const isPointHit = dist <= radius * (cloudCanvas.width / 1024) + 8;
+            const isLabelHit = pt._labelBox &&
+                mouseX >= pt._labelBox.x && mouseX <= pt._labelBox.x + pt._labelBox.w &&
+                mouseY >= pt._labelBox.y && mouseY <= pt._labelBox.y + pt._labelBox.h;
+            if (isPointHit || isLabelHit) {
                 clickedWord = pt.word;
                 clickedCount = pt.count;
                 break;
@@ -3550,7 +3569,11 @@ cloudCanvas.addEventListener('dblclick', (e) => {
             }
             
             const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist <= radius * (cloudCanvas.width / 1024) + 8) {
+            const isPointHit = dist <= radius * (cloudCanvas.width / 1024) + 8;
+            const isLabelHit = pt._labelBox &&
+                mouseX >= pt._labelBox.x && mouseX <= pt._labelBox.x + pt._labelBox.w &&
+                mouseY >= pt._labelBox.y && mouseY <= pt._labelBox.y + pt._labelBox.h;
+            if (isPointHit || isLabelHit) {
                 canvasLastClickedWord = null;
                 addStopWord(pt.word);
                 tooltip.style.display = 'none';
@@ -6382,6 +6405,326 @@ function drawPCALegend(ctx, canvasWidth, canvasHeight, isDarkTheme, minCount, ma
     ctx.restore();
 }
 
+/**
+ * Force-directed label placement algorithm (ggrepel-like)
+ * 散布図のラベル同士およびデータ点との重なりを力学シミュレーションで回避し、
+ * 必要に応じて引き出し線を描画するための最適なラベル座標を計算する。
+ */
+function computeRepelLabels(points, scaleX, scaleY, canvasWidth, canvasHeight, scaleFactor, selectedFont, baseFontSize, ctx, minCount, maxCount) {
+    if (!points || points.length === 0) return [];
+
+    const fontSizePx = Math.round(baseFontSize * scaleFactor);
+    ctx.font = `bold ${fontSizePx}px ${selectedFont}`;
+
+    const labels = points.map((p, idx) => {
+        const px = scaleX(p.x);
+        const py = scaleY(p.y);
+
+        let radius = 10;
+        if (maxCount !== minCount) {
+            radius = 5 + ((p.count - minCount) / (maxCount - minCount)) * 14;
+        }
+        const r = radius * scaleFactor;
+
+        const metrics = ctx.measureText(p.word);
+        const w = metrics.width + 6 * scaleFactor;
+        const h = fontSizePx * 1.25;
+
+        // 初期位置: 点の真上
+        const origX = px;
+        const origY = py - r - h / 2 - 2 * scaleFactor;
+
+        return {
+            idx,
+            word: p.word,
+            point: p,
+            px,
+            py,
+            r,
+            w,
+            h,
+            x: origX,
+            y: origY,
+            origX,
+            origY,
+            vx: 0,
+            vy: 0,
+            isNoise: p.cluster === -1,
+            cluster: p.cluster
+        };
+    });
+
+    const numLabels = labels.length;
+    const iterations = Math.min(65, Math.max(40, Math.round(numLabels * 1.1)));
+
+    // 凡例領域（左下）の除外ボックス
+    const legendBox = {
+        left: 10 * scaleFactor,
+        right: 360 * scaleFactor,
+        top: canvasHeight - 85 * scaleFactor,
+        bottom: canvasHeight - 5 * scaleFactor
+    };
+
+    const pad = 12 * scaleFactor;
+
+    for (let iter = 0; iter < iterations; iter++) {
+        const cooling = Math.max(0.2, 1 - (iter / iterations) * 0.75);
+
+        // 1. ラベル同士の斥力（Label-Label Repulsion）
+        for (let i = 0; i < numLabels; i++) {
+            const A = labels[i];
+            for (let j = i + 1; j < numLabels; j++) {
+                const B = labels[j];
+
+                const dx = B.x - A.x;
+                const dy = B.y - A.y;
+
+                const minDistX = (A.w + B.w) / 2 + 4 * scaleFactor;
+                const minDistY = (A.h + B.h) / 2 + 3 * scaleFactor;
+
+                const absDx = Math.abs(dx);
+                const absDy = Math.abs(dy);
+
+                if (absDx < minDistX && absDy < minDistY) {
+                    const overlapX = minDistX - absDx;
+                    const overlapY = minDistY - absDy;
+
+                    const signX = (dx >= 0 ? 1 : -1);
+                    const signY = (dy >= 0 ? 1 : -1);
+
+                    let fx = 0, fy = 0;
+                    if (overlapX < overlapY * 1.4) {
+                        fx = signX * overlapX * 0.45;
+                        fy = signY * overlapY * 0.15;
+                    } else {
+                        fx = signX * overlapX * 0.15;
+                        fy = signY * overlapY * 0.45;
+                    }
+
+                    A.vx -= fx;
+                    A.vy -= fy;
+                    B.vx += fx;
+                    B.vy += fy;
+                }
+            }
+        }
+
+        // 2. データ点との斥力（Label-Point Repulsion）
+        for (let i = 0; i < numLabels; i++) {
+            const A = labels[i];
+
+            for (let j = 0; j < numLabels; j++) {
+                const P = labels[j];
+
+                const clampX = Math.max(A.x - A.w / 2, Math.min(A.x + A.w / 2, P.px));
+                const clampY = Math.max(A.y - A.h / 2, Math.min(A.y + A.h / 2, P.py));
+
+                let dx = clampX - P.px;
+                let dy = clampY - P.py;
+                let dist = Math.sqrt(dx * dx + dy * dy);
+
+                const minDist = P.r + 5 * scaleFactor;
+                if (dist < minDist) {
+                    if (dist === 0) {
+                        dx = (Math.random() - 0.5) || 1;
+                        dy = -1;
+                        dist = 1;
+                    }
+                    const push = (minDist - dist);
+                    const fx = (dx / dist) * push * 0.55;
+                    const fy = (dy / dist) * push * 0.55;
+                    A.vx += fx;
+                    A.vy += fy;
+                }
+            }
+        }
+
+        // 3. 元のアンカー位置への引力（Spring Force to original position）
+        for (let i = 0; i < numLabels; i++) {
+            const A = labels[i];
+            const dx = A.origX - A.x;
+            const dy = A.origY - A.y;
+
+            A.vx += dx * 0.055;
+            A.vy += dy * 0.055;
+        }
+
+        // 4. 凡例領域との重なり回避
+        for (let i = 0; i < numLabels; i++) {
+            const A = labels[i];
+            const left = A.x - A.w / 2;
+            const right = A.x + A.w / 2;
+            const top = A.y - A.h / 2;
+            const bottom = A.y + A.h / 2;
+
+            if (right > legendBox.left && left < legendBox.right && bottom > legendBox.top && top < legendBox.bottom) {
+                const pushY = (legendBox.top - bottom);
+                A.vy += pushY * 0.4;
+            }
+        }
+
+        // 5. 境界制限および位置更新
+        for (let i = 0; i < numLabels; i++) {
+            const A = labels[i];
+
+            if (A.x - A.w / 2 < pad) {
+                A.x = pad + A.w / 2;
+                A.vx = 0;
+            } else if (A.x + A.w / 2 > canvasWidth - pad) {
+                A.x = canvasWidth - pad - A.w / 2;
+                A.vx = 0;
+            }
+
+            if (A.y - A.h / 2 < pad) {
+                A.y = pad + A.h / 2;
+                A.vy = 0;
+            } else if (A.y + A.h / 2 > canvasHeight - pad) {
+                A.y = canvasHeight - pad - A.h / 2;
+                A.vy = 0;
+            }
+
+            A.x += A.vx * cooling;
+            A.y += A.vy * cooling;
+
+            A.vx *= 0.62;
+            A.vy *= 0.62;
+        }
+    }
+
+    return labels;
+}
+
+/**
+ * 散布図（PCA / UMAP）のデータ点・引き出し線・ラベルを描画する共通ヘルパー
+ */
+function drawScatterPointsAndLabels(ctx, points, scaleX, scaleY, canvasWidth, canvasHeight, scaleFactor, selectedTheme, selectedFont, isDarkTheme, minCount, maxCount) {
+    const isRepelEnabled = !scatterRepelCheck || scatterRepelCheck.checked;
+    const baseFontSize = (networkFontSizeRange && networkFontSizeRange.value) ? parseInt(networkFontSizeRange.value, 10) : 15;
+    const fontSizePx = Math.round(baseFontSize * scaleFactor);
+    ctx.font = `bold ${fontSizePx}px ${selectedFont}`;
+
+    let labelDataList = [];
+
+    if (isRepelEnabled) {
+        labelDataList = computeRepelLabels(points, scaleX, scaleY, canvasWidth, canvasHeight, scaleFactor, selectedFont, baseFontSize, ctx, minCount, maxCount);
+    } else {
+        // 従来の固定配置
+        labelDataList = points.map(p => {
+            const px = scaleX(p.x);
+            const py = scaleY(p.y);
+            let radius = 10;
+            if (maxCount !== minCount) {
+                radius = 5 + ((p.count - minCount) / (maxCount - minCount)) * 14;
+            }
+            const r = radius * scaleFactor;
+            const metrics = ctx.measureText(p.word);
+            const w = metrics.width + 6 * scaleFactor;
+            const h = fontSizePx * 1.25;
+            const y = py - r - h / 2 - 2 * scaleFactor;
+            return {
+                word: p.word,
+                point: p,
+                px, py, r, w, h,
+                x: px, y,
+                origX: px, origY: y,
+                isNoise: p.cluster === -1,
+                cluster: p.cluster
+            };
+        });
+    }
+
+    // 1. 引き出し線（Leader Lines）を描画（点より先に描画して自然な重なり順に）
+    if (isRepelEnabled) {
+        ctx.save();
+        ctx.lineWidth = 1 * scaleFactor;
+        labelDataList.forEach(lbl => {
+            const dx = lbl.x - lbl.px;
+            const dy = lbl.y - lbl.py;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            // 元の位置（アンカー）から一定以上離れた場合に引き出し線を描画
+            const threshold = lbl.r + 7 * scaleFactor;
+            if (dist > threshold) {
+                const angle = Math.atan2(dy, dx);
+                const startX = lbl.px + Math.cos(angle) * (lbl.r + 2 * scaleFactor);
+                const startY = lbl.py + Math.sin(angle) * (lbl.r + 2 * scaleFactor);
+
+                const endX = Math.max(lbl.x - lbl.w / 2 + 3 * scaleFactor, Math.min(lbl.x + lbl.w / 2 - 3 * scaleFactor, startX));
+                const endY = Math.max(lbl.y - lbl.h / 2 + 2 * scaleFactor, Math.min(lbl.y + lbl.h / 2 - 2 * scaleFactor, startY));
+
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(endX, endY);
+                ctx.strokeStyle = isDarkTheme ? 'rgba(255, 255, 255, 0.42)' : 'rgba(0, 0, 0, 0.32)';
+                ctx.stroke();
+
+                // 点側の根元に小さなアクセントドット（ggrepelスタイル）
+                ctx.beginPath();
+                ctx.arc(startX, startY, 1.2 * scaleFactor, 0, 2 * Math.PI);
+                ctx.fillStyle = isDarkTheme ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.5)';
+                ctx.fill();
+            }
+        });
+        ctx.restore();
+    }
+
+    // 2. データ点（円）を描画
+    labelDataList.forEach(lbl => {
+        const p = lbl.point;
+        const isNoise = lbl.isNoise;
+        const color = isNoise
+            ? (isDarkTheme ? '#64748b' : '#94a3b8')
+            : getNetworkNodeColor(selectedTheme, p.cluster, isDarkTheme);
+
+        ctx.beginPath();
+        ctx.arc(lbl.px, lbl.py, lbl.r, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+
+        ctx.strokeStyle = isNoise
+            ? (isDarkTheme ? '#cbd5e1' : '#475569')
+            : (selectedTheme === 'pure-bw' 
+                ? '#000000' 
+                : (isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.3)'));
+        ctx.lineWidth = (isNoise ? 2 : 1.5) * scaleFactor;
+        if (isNoise) {
+            ctx.setLineDash([3 * scaleFactor, 3 * scaleFactor]);
+        } else {
+            ctx.setLineDash([]);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+    });
+
+    // 3. ラベルテキストを描画（最前面に配置し縁取りで高い可読性を確保）
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${fontSizePx}px ${selectedFont}`;
+
+    labelDataList.forEach(lbl => {
+        // 白またはダークテーマ色のハロー（縁取り）
+        ctx.strokeStyle = isDarkTheme ? '#0B0F19' : '#FFFFFF';
+        ctx.lineWidth = Math.max(3, Math.round(baseFontSize * 0.28)) * scaleFactor;
+        ctx.lineJoin = 'round';
+        ctx.strokeText(lbl.word, lbl.x, lbl.y);
+
+        // ラベル本文
+        ctx.fillStyle = lbl.isNoise
+            ? (isDarkTheme ? '#94a3b8' : '#64748b')
+            : (isDarkTheme ? '#F3F4F6' : '#111111');
+        ctx.fillText(lbl.word, lbl.x, lbl.y);
+
+        // マウス判定用に対象オブジェクトにラベル矩形情報をキャッシュ
+        lbl.point._labelBox = {
+            x: lbl.x - lbl.w / 2,
+            y: lbl.y - lbl.h / 2,
+            w: lbl.w,
+            h: lbl.h
+        };
+    });
+    ctx.restore();
+}
+
 // Helper to draw PCA Scatter Plot on any canvas
 function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkTheme) {
     const ctx = canvas.getContext('2d');
@@ -6513,59 +6856,8 @@ function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThem
     });
     ctx.restore();
     
-    // Draw single word points and labels
-    points.forEach(p => {
-        const px = scaleX(p.x);
-        const py = scaleY(p.y);
-        
-        let radius = 10;
-        if (maxCount !== minCount) {
-            radius = 5 + ((p.count - minCount) / (maxCount - minCount)) * 14;
-        }
-        
-        const isNoise = (p.cluster === -1);
-        const color = isNoise
-            ? (isDarkTheme ? '#64748b' : '#94a3b8')
-            : getNetworkNodeColor(selectedTheme, p.cluster, isDarkTheme);
-        
-        ctx.beginPath();
-        ctx.arc(px, py, radius * scaleFactor, 0, 2 * Math.PI);
-        ctx.fillStyle = color;
-        ctx.fill();
-        
-        ctx.strokeStyle = isNoise
-            ? (isDarkTheme ? '#cbd5e1' : '#475569')
-            : (selectedTheme === 'pure-bw' 
-                ? '#000000' 
-                : (isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.3)'));
-        ctx.lineWidth = (isNoise ? 2 : 1.5) * scaleFactor;
-        if (isNoise) {
-            ctx.setLineDash([3 * scaleFactor, 3 * scaleFactor]);
-        } else {
-            ctx.setLineDash([]);
-        }
-        ctx.stroke();
-        ctx.setLineDash([]);
-        
-        const baseFontSize = (networkFontSizeRange && networkFontSizeRange.value) ? parseInt(networkFontSizeRange.value, 10) : 15;
-        const fontSizePx = Math.round(baseFontSize * scaleFactor);
-        
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.font = `bold ${fontSizePx}px ${selectedFont}`;
-        
-        const labelY = py - (radius * scaleFactor + 4 * scaleFactor);
-        
-        ctx.strokeStyle = isDarkTheme ? '#0B0F19' : '#FFFFFF';
-        ctx.lineWidth = Math.max(3, Math.round(baseFontSize * 0.28)) * scaleFactor;
-        ctx.lineJoin = 'round';
-        ctx.strokeText(p.word, px, labelY);
-        
-        ctx.fillStyle = isNoise
-            ? (isDarkTheme ? '#94a3b8' : '#64748b')
-            : (isDarkTheme ? '#F3F4F6' : '#111111');
-        ctx.fillText(p.word, px, labelY);
-    });
+    // Draw single word points, leader lines, and labels (with ggrepel-like collision avoidance)
+    drawScatterPointsAndLabels(ctx, points, scaleX, scaleY, canvas.width, canvas.height, scaleFactor, selectedTheme, selectedFont, isDarkTheme, minCount, maxCount);
 
     const activePcaStats = clusterMethod === 'hdbscan' ? pcaHdbscanStats : pcaDbscanStats;
     drawPCALegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, numClusters, selectedTheme, selectedFont, clusterMethod, activePcaStats);
@@ -7038,59 +7330,8 @@ function drawUMAPOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThe
     });
     ctx.restore();
     
-    // Draw single word points and labels
-    points.forEach(p => {
-        const px = scaleX(p.x);
-        const py = scaleY(p.y);
-        
-        let radius = 10;
-        if (maxCount !== minCount) {
-            radius = 5 + ((p.count - minCount) / (maxCount - minCount)) * 14;
-        }
-        
-        const isNoise = (p.cluster === -1);
-        const color = isNoise
-            ? (isDarkTheme ? '#64748b' : '#94a3b8')
-            : getNetworkNodeColor(selectedTheme, p.cluster, isDarkTheme);
-        
-        ctx.beginPath();
-        ctx.arc(px, py, radius * scaleFactor, 0, 2 * Math.PI);
-        ctx.fillStyle = color;
-        ctx.fill();
-        
-        ctx.strokeStyle = isNoise
-            ? (isDarkTheme ? '#cbd5e1' : '#475569')
-            : (selectedTheme === 'pure-bw' 
-                ? '#000000' 
-                : (isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.3)'));
-        ctx.lineWidth = (isNoise ? 2 : 1.5) * scaleFactor;
-        if (isNoise) {
-            ctx.setLineDash([3 * scaleFactor, 3 * scaleFactor]);
-        } else {
-            ctx.setLineDash([]);
-        }
-        ctx.stroke();
-        ctx.setLineDash([]);
-        
-        const baseFontSize = (networkFontSizeRange && networkFontSizeRange.value) ? parseInt(networkFontSizeRange.value, 10) : 15;
-        const fontSizePx = Math.round(baseFontSize * scaleFactor);
-        
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.font = `bold ${fontSizePx}px ${selectedFont}`;
-        
-        const labelY = py - (radius * scaleFactor + 4 * scaleFactor);
-        
-        ctx.strokeStyle = isDarkTheme ? '#0B0F19' : '#FFFFFF';
-        ctx.lineWidth = Math.max(3, Math.round(baseFontSize * 0.28)) * scaleFactor;
-        ctx.lineJoin = 'round';
-        ctx.strokeText(p.word, px, labelY);
-        
-        ctx.fillStyle = isNoise
-            ? (isDarkTheme ? '#94a3b8' : '#64748b')
-            : (isDarkTheme ? '#F3F4F6' : '#111111');
-        ctx.fillText(p.word, px, labelY);
-    });
+    // Draw single word points, leader lines, and labels (with ggrepel-like collision avoidance)
+    drawScatterPointsAndLabels(ctx, points, scaleX, scaleY, canvas.width, canvas.height, scaleFactor, selectedTheme, selectedFont, isDarkTheme, minCount, maxCount);
 
     const activeUmapStats = clusterMethod === 'hdbscan' ? umapHdbscanStats : umapDbscanStats;
     drawUMAPLegend(ctx, canvas.width, canvas.height, isDarkTheme, minCount, maxCount, numClusters, selectedTheme, selectedFont, clusterMethod, activeUmapStats);

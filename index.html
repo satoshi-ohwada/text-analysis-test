@@ -340,6 +340,12 @@
                             <button type="button" class="slider-step-btn" data-step-dir="1" data-slider-id="network-font-size-range" title="1px大きく" aria-label="1px大きく">＋</button>
                         </div>
                     </div>
+                    <div id="scatter-repel-container" style="display: none; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border-color);">
+                        <label class="checkbox-container" style="font-size: 11.5px; color: var(--text-primary); margin: 0;" title="密集した単語ラベル同士やデータ点との重なりを自動回避し、引き出し線を描画します (ggrepel風)">
+                            <input type="checkbox" id="scatter-repel-check" checked>
+                            <span>ラベル重なり自動回避 (ggrepel風)</span>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="checkbox-group column-layout" id="cloud-options-group">
