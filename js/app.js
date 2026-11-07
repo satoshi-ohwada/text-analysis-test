@@ -2609,6 +2609,9 @@ initSliderStepButtons();
 [posNoun, posVerb, posAdj, posAdv, mergeNounsCheckbox, document.getElementById('ranking-method'), networkMinEdgeCheck].forEach(elem => {
     if (!elem) return;
     elem.addEventListener('change', () => {
+        if (elem === networkMinEdgeCheck) {
+            isForceRelayout = true;
+        }
         if (rawTextData) {
             processAndRender();
         }
@@ -3142,6 +3145,18 @@ if (ldaTopicRadios.length > 0 && ldaTopicCountInput) {
     });
 }
 
+function resizeCanvas() {
+    if (!canvasContainer || !cloudCanvas) return;
+    const width = Math.round(canvasContainer.clientWidth);
+    const height = Math.round(canvasContainer.clientHeight);
+    if (width > 0 && height > 0) {
+        if (cloudCanvas.width !== width || cloudCanvas.height !== height) {
+            cloudCanvas.width = width;
+            cloudCanvas.height = height;
+        }
+    }
+}
+
 window.addEventListener('resize', () => {
     if (rawTextData) {
         resizeCanvas();
@@ -3149,11 +3164,28 @@ window.addEventListener('resize', () => {
     }
 });
 
-function resizeCanvas() {
-    const width = canvasContainer.clientWidth;
-    const height = canvasContainer.clientHeight;
-    cloudCanvas.width = width;
-    cloudCanvas.height = height;
+// Observe canvasContainer resizing (e.g., when network excluded bar or analysis summary appears/disappears)
+if (typeof ResizeObserver !== 'undefined' && canvasContainer) {
+    let canvasResizeTimer = null;
+    const canvasObserver = new ResizeObserver(entries => {
+        for (const entry of entries) {
+            const w = Math.round(entry.contentRect.width);
+            const h = Math.round(entry.contentRect.height);
+            if (w > 0 && h > 0) {
+                if (cloudCanvas.width !== w || cloudCanvas.height !== h) {
+                    cloudCanvas.width = w;
+                    cloudCanvas.height = h;
+                    if (rawTextData && typeof updateWordCloud === 'function') {
+                        if (canvasResizeTimer) clearTimeout(canvasResizeTimer);
+                        canvasResizeTimer = setTimeout(() => {
+                            updateWordCloud();
+                        }, 30);
+                    }
+                }
+            }
+        }
+    });
+    canvasObserver.observe(canvasContainer);
 }
 
 function drawRoundedRect(ctx, x, y, width, height, radius) {
@@ -5169,6 +5201,9 @@ function processAndRender() {
     // --- LDA TOPIC MODELING & AUTOMATIC TOPIC NUMBER SELECTION ---
     runLDAAnalysis(lineWordsList, filteredList.map(w => w.text));
 
+    if (typeof updateNetworkExcludedBar === 'function') {
+        updateNetworkExcludedBar(displayType ? displayType.value : 'cloud');
+    }
     resizeCanvas();
     updateWordCloud();
 }
@@ -7118,6 +7153,34 @@ function computeWordCloudList(filteredList, rankingMethod, canvasWidth, canvasHe
     });
 }
 
+// Update Co-occurrence Network Excluded Words Bar
+function updateNetworkExcludedBar(type) {
+    const bar = document.getElementById('network-excluded-bar');
+    if (!bar) return;
+    const viewType = type || (displayType ? displayType.value : 'cloud');
+    if (viewType === 'network' && networkExcludedWords && networkExcludedWords.length > 0) {
+        bar.style.display = 'block';
+        const countEl = document.getElementById('network-excluded-count');
+        const tagsEl = document.getElementById('network-excluded-tags');
+        if (countEl) countEl.innerText = networkExcludedWords.length;
+        if (tagsEl) {
+            tagsEl.innerHTML = '';
+            networkExcludedWords.forEach(item => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'excluded-word-tag';
+                btn.title = 'クリックして用例(KWIC)を表示';
+                const safeWord = item.text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                btn.innerHTML = `<span>${safeWord}</span><span style="color: var(--text-muted); font-size: 10px;">${item.count}回</span>`;
+                btn.addEventListener('click', () => openKWICModal(item.text, item.count));
+                tagsEl.appendChild(btn);
+            });
+        }
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
 // 5. Draw Word Cloud, Canvas Bar Chart, Co-occurrence Network, or PCA Scatter Plot
 function updateWordCloud() {
     if (typeof tooltip !== 'undefined' && tooltip) {
@@ -7128,6 +7191,14 @@ function updateWordCloud() {
         cancelAnimationFrame(networkAnimationFrameId);
         networkAnimationFrameId = null;
     }
+
+    const currentDisplayType = displayType ? displayType.value : 'cloud';
+
+    // 1. Ensure excluded words bar visibility is updated BEFORE measuring canvas size
+    updateNetworkExcludedBar(currentDisplayType);
+
+    // 2. Synchronize canvas resolution with actual container size to prevent distortion
+    resizeCanvas();
 
     const networkExcludedBar = document.getElementById('network-excluded-bar');
 
@@ -7159,7 +7230,6 @@ function updateWordCloud() {
     const minCount = parseInt(minCountRange.value);
     const maxWords = getMaxWords();
     const rankingMethod = document.getElementById('ranking-method').value;
-    const currentDisplayType = displayType.value;
     
     const selectedTheme = colorTheme.value;
     const isDarkTheme = selectedTheme === 'aurora-dark' || selectedTheme === 'monochrome-dark';
@@ -7351,6 +7421,8 @@ function updateWordCloud() {
                     node.x = cloudCanvas.width / 2 + (Math.random() - 0.5) * 100;
                     node.y = cloudCanvas.height / 2 + (Math.random() - 0.5) * 100;
                 }
+                node.x = Math.max(node.radius + 15, Math.min(cloudCanvas.width - node.radius - 15, node.x));
+                node.y = Math.max(node.radius + 15, Math.min(cloudCanvas.height - node.radius - 15, node.y));
                 node.vx = 0;
                 node.vy = 0;
             });
@@ -7480,29 +7552,7 @@ function updateWordCloud() {
     }
 
     // Update Network Excluded Words Bar
-    if (networkExcludedBar) {
-        if (currentDisplayType === 'network' && networkExcludedWords && networkExcludedWords.length > 0) {
-            networkExcludedBar.style.display = 'block';
-            const countEl = document.getElementById('network-excluded-count');
-            const tagsEl = document.getElementById('network-excluded-tags');
-            if (countEl) countEl.innerText = networkExcludedWords.length;
-            if (tagsEl) {
-                tagsEl.innerHTML = '';
-                networkExcludedWords.forEach(item => {
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'excluded-word-tag';
-                    btn.title = 'クリックして用例(KWIC)を表示';
-                    const safeWord = item.text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                    btn.innerHTML = `<span>${safeWord}</span><span style="color: var(--text-muted); font-size: 10px;">${item.count}回</span>`;
-                    btn.addEventListener('click', () => openKWICModal(item.text, item.count));
-                    tagsEl.appendChild(btn);
-                });
-            }
-        } else {
-            networkExcludedBar.style.display = 'none';
-        }
-    }
+    updateNetworkExcludedBar(currentDisplayType);
 
     // ① 自動コメント + ③ 次のステップ提案
     renderAnalysisSummary(currentDisplayType, filteredList);
