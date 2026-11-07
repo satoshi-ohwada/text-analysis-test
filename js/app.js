@@ -7247,6 +7247,7 @@ function updateWordCloud() {
             gridSize: Math.max(4, Math.min(8, Math.round(5 * (cloudCanvas.width / 1024)))),
             weightFactor: 1,
             fontFamily: selectedFont,
+            fontWeight: selectedFont.includes('Zen Maru Gothic') ? 500 : 'normal',
             color: wordColorFunc,
             rotateRatio: isRotate ? 0.35 : 0,
             rotationSteps: 2,
