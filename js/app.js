@@ -245,26 +245,47 @@ function updateStatsBar(lines, totalWords, uniqueWords) {
 
 // Sample Opinions Text (Demo Data) is now loaded dynamically from data/sample.txt
 
+// Safe localStorage wrapper to prevent crashes in private browsing or restricted environments
+const safeStorage = {
+    getItem(key) {
+        try {
+            return typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
+        } catch (e) {
+            return null;
+        }
+    },
+    setItem(key, value) {
+        try {
+            if (typeof localStorage !== 'undefined') localStorage.setItem(key, value);
+        } catch (e) {}
+    },
+    removeItem(key) {
+        try {
+            if (typeof localStorage !== 'undefined') localStorage.removeItem(key);
+        } catch (e) {}
+    }
+};
+
 // 1. Initialize Kuromoji and Load Stop Words
 function saveSettings() {
-    localStorage.setItem('customStopWords', JSON.stringify(Array.from(customStopWords)));
-    localStorage.setItem('customCompoundWords', JSON.stringify(Array.from(customCompoundWords)));
-    localStorage.setItem('customSynonymRules', JSON.stringify(Array.from(customSynonymRules.entries())));
+    safeStorage.setItem('customStopWords', JSON.stringify(Array.from(customStopWords)));
+    safeStorage.setItem('customCompoundWords', JSON.stringify(Array.from(customCompoundWords)));
+    safeStorage.setItem('customSynonymRules', JSON.stringify(Array.from(customSynonymRules.entries())));
 }
 
 function loadSettings() {
     try {
-        const storedStopWords = localStorage.getItem('customStopWords');
+        const storedStopWords = safeStorage.getItem('customStopWords');
         if (storedStopWords) {
             customStopWords = new Set(JSON.parse(storedStopWords));
         }
         
-        const storedCompoundWords = localStorage.getItem('customCompoundWords');
+        const storedCompoundWords = safeStorage.getItem('customCompoundWords');
         if (storedCompoundWords) {
             customCompoundWords = new Set(JSON.parse(storedCompoundWords));
         }
         
-        const storedSynonymRules = localStorage.getItem('customSynonymRules');
+        const storedSynonymRules = safeStorage.getItem('customSynonymRules');
         if (storedSynonymRules) {
             customSynonymRules = new Map(JSON.parse(storedSynonymRules));
         }
@@ -374,10 +395,10 @@ async function initKuromoji() {
                 loadSettings();
 
                 // If local storage has no custom rules and has never been explicitly cleared, initialize from data/custom_rules.txt
-                const isExplicitlyCleared = localStorage.getItem('customRulesCleared') === 'true';
-                const hasExistingStorage = localStorage.getItem('customCompoundWords') !== null ||
-                                           localStorage.getItem('customStopWords') !== null ||
-                                           localStorage.getItem('customSynonymRules') !== null;
+                const isExplicitlyCleared = safeStorage.getItem('customRulesCleared') === 'true';
+                const hasExistingStorage = safeStorage.getItem('customCompoundWords') !== null ||
+                                           safeStorage.getItem('customStopWords') !== null ||
+                                           safeStorage.getItem('customSynonymRules') !== null;
 
                 if (!isExplicitlyCleared && !hasExistingStorage && defaultCustomRulesText) {
                     const parsed = parseRulesText(defaultCustomRulesText);
@@ -797,7 +818,7 @@ function clearAllRules() {
         customCompoundWords.clear();
         customStopWords.clear();
         customSynonymRules.clear();
-        localStorage.setItem('customRulesCleared', 'true');
+        safeStorage.setItem('customRulesCleared', 'true');
         saveSettings();
         renderCompoundWords();
         renderStopWords();
@@ -834,7 +855,7 @@ function applyParsedRules(parsed, mode) {
         parsed.synonymRules.forEach((v, k) => customSynonymRules.set(k, v));
     }
 
-    localStorage.removeItem('customRulesCleared');
+    safeStorage.removeItem('customRulesCleared');
     saveSettings();
     renderCompoundWords();
     renderStopWords();
@@ -2499,17 +2520,26 @@ function debouncedUpdateWordCloud(delay = 120) {
     }, delay);
 }
 
+let processAndRenderDebounceTimer = null;
+function debouncedProcessAndRender(delay = 140) {
+    if (processAndRenderDebounceTimer) clearTimeout(processAndRenderDebounceTimer);
+    processAndRenderDebounceTimer = setTimeout(() => {
+        if (rawTextData) processAndRender();
+    }, delay);
+}
+
 minCountRange.addEventListener('input', (e) => {
     minCountVal.innerText = e.target.value;
     updateMaxWordsDisplay();
     if (displayType.value === 'network' || displayType.value === 'pca' || displayType.value === 'umap') {
-        if (rawTextData) processAndRender();
+        debouncedProcessAndRender(140);
     } else {
         debouncedUpdateWordCloud(120);
     }
 });
 minCountRange.addEventListener('change', () => {
     if (wordCloudDebounceTimer) clearTimeout(wordCloudDebounceTimer);
+    if (processAndRenderDebounceTimer) clearTimeout(processAndRenderDebounceTimer);
     if (displayType.value === 'network' || displayType.value === 'pca' || displayType.value === 'umap') {
         if (rawTextData) processAndRender();
     } else {
@@ -2520,13 +2550,14 @@ minCountRange.addEventListener('change', () => {
 maxWordsRange.addEventListener('input', (e) => {
     updateMaxWordsDisplay();
     if (displayType.value === 'network' || displayType.value === 'pca' || displayType.value === 'umap') {
-        if (rawTextData) processAndRender();
+        debouncedProcessAndRender(140);
     } else {
         debouncedUpdateWordCloud(120);
     }
 });
 maxWordsRange.addEventListener('change', () => {
     if (wordCloudDebounceTimer) clearTimeout(wordCloudDebounceTimer);
+    if (processAndRenderDebounceTimer) clearTimeout(processAndRenderDebounceTimer);
     if (displayType.value === 'network' || displayType.value === 'pca' || displayType.value === 'umap') {
         if (rawTextData) processAndRender();
     } else {
@@ -2536,6 +2567,8 @@ maxWordsRange.addEventListener('change', () => {
 
 if (maxWordsAllCheck) {
     maxWordsAllCheck.addEventListener('change', () => {
+        if (wordCloudDebounceTimer) clearTimeout(wordCloudDebounceTimer);
+        if (processAndRenderDebounceTimer) clearTimeout(processAndRenderDebounceTimer);
         updateMaxWordsDisplay();
         if (displayType.value === 'network' || displayType.value === 'pca' || displayType.value === 'umap') {
             if (rawTextData) processAndRender();
@@ -2548,6 +2581,12 @@ if (maxWordsAllCheck) {
 if (networkThresholdRange) {
     networkThresholdRange.addEventListener('input', (e) => {
         if (networkThresholdVal) networkThresholdVal.innerText = e.target.value;
+        if (displayType.value === 'network') {
+            debouncedProcessAndRender(140);
+        }
+    });
+    networkThresholdRange.addEventListener('change', () => {
+        if (processAndRenderDebounceTimer) clearTimeout(processAndRenderDebounceTimer);
         if (displayType.value === 'network' && rawTextData) {
             processAndRender();
         }
@@ -2894,6 +2933,8 @@ function updateClusterCountGroupVisibility() {
 
 // Combined displayType change handler: update description/cluster UI AND re-render
 displayType.addEventListener('change', () => {
+    if (wordCloudDebounceTimer) clearTimeout(wordCloudDebounceTimer);
+    if (processAndRenderDebounceTimer) clearTimeout(processAndRenderDebounceTimer);
     updateClusterCountGroupVisibility();
     if (rawTextData) {
         processAndRender();
@@ -4603,34 +4644,40 @@ if (exportPairsCsvBtn) {
 }
 
 // Instantly download N-gram collocation list
+function triggerNgramCsvDownload(silent = false) {
+    if (!wordFrequencies || wordFrequencies.length === 0) return;
+    const list = getFilteredAndSortedNgrams();
+    if (!list || list.length === 0) {
+        if (!silent) {
+            alert("エクスポート可能なコロケーションデータがありません。");
+        }
+        return;
+    }
+
+    let wordsHeader = '';
+    for (let i = 1; i <= currentNgramN; i++) {
+        wordsHeader += `構成単語${i},`;
+    }
+
+    let csv = `順位,コロケーション,${wordsHeader}出現回数,文書数 (DF),Jaccard係数\n`;
+    list.forEach((item, idx) => {
+        const rank = idx + 1;
+        const escapedPhrase = item.phrase.replace(/"/g, '""');
+        let wordsCols = '';
+        for (let i = 0; i < currentNgramN; i++) {
+            const w = item.words[i] || '';
+            wordsCols += `"${w.replace(/"/g, '""')}",`;
+        }
+        csv += `${rank},"${escapedPhrase}",${wordsCols}${item.count},${item.docCount},${item.jaccard > 0 ? item.jaccard.toFixed(4) : '-'}\n`;
+    });
+
+    downloadCSV(`collocation_${currentNgramN}gram_metrics.csv`, csv);
+}
+
 if (exportNgramCsvBtn) {
     exportNgramCsvBtn.addEventListener('click', () => {
         closeCsvDropdown();
-        if (!wordFrequencies || wordFrequencies.length === 0) return;
-        const list = getFilteredAndSortedNgrams();
-        if (!list || list.length === 0) {
-            alert("エクスポート可能なコロケーションデータがありません。");
-            return;
-        }
-
-        let wordsHeader = '';
-        for (let i = 1; i <= currentNgramN; i++) {
-            wordsHeader += `構成単語${i},`;
-        }
-
-        let csv = `順位,コロケーション,${wordsHeader}出現回数,文書数 (DF),Jaccard係数\n`;
-        list.forEach((item, idx) => {
-            const rank = idx + 1;
-            const escapedPhrase = item.phrase.replace(/"/g, '""');
-            let wordsCols = '';
-            for (let i = 0; i < currentNgramN; i++) {
-                const w = item.words[i] || '';
-                wordsCols += `"${w.replace(/"/g, '""')}",`;
-            }
-            csv += `${rank},"${escapedPhrase}",${wordsCols}${item.count},${item.docCount},${item.jaccard > 0 ? item.jaccard.toFixed(4) : '-'}\n`;
-        });
-
-        downloadCSV(`collocation_${currentNgramN}gram_metrics.csv`, csv);
+        triggerNgramCsvDownload(false);
     });
 }
 
@@ -4644,7 +4691,7 @@ if (exportAllCsvBtn) {
             if (exportPairsCsvBtn) exportPairsCsvBtn.click();
         }, 250);
         setTimeout(() => {
-            if (exportNgramCsvBtn) exportNgramCsvBtn.click();
+            triggerNgramCsvDownload(true);
         }, 500);
     });
 }
@@ -6773,8 +6820,11 @@ function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThem
     const minY = Math.min(...ys, -0.01);
     const maxY = Math.max(...ys, 0.01);
     
-    const scaleX = (x) => padding + ((x - minX) / (maxX - minX)) * (canvas.width - 2 * padding);
-    const scaleY = (y) => padding + ((maxY - y) / (maxY - minY)) * (canvas.height - 2 * padding);
+    const spanX = Math.max(0.001, maxX - minX);
+    const spanY = Math.max(0.001, maxY - minY);
+
+    const scaleX = (x) => padding + ((x - minX) / spanX) * (canvas.width - 2 * padding);
+    const scaleY = (y) => padding + ((maxY - y) / spanY) * (canvas.height - 2 * padding);
     
     const zeroX = scaleX(0);
     const zeroY = scaleY(0);
@@ -6833,8 +6883,8 @@ function drawPCAOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThem
     ctx.restore();
     
     const counts = points.map(p => p.count);
-    const minCount = Math.min(...counts);
-    const maxCount = Math.max(...counts);
+    const minCount = counts.length > 0 ? Math.min(...counts) : 1;
+    const maxCount = counts.length > 0 ? Math.max(...counts) : 1;
     
     const isDensityBased = (clusterMethod === 'dbscan' || clusterMethod === 'hdbscan');
     const validClusters = points.map(p => p.cluster).filter(c => c >= 0);
@@ -7307,8 +7357,8 @@ function drawUMAPOnCanvas(canvas, points, selectedTheme, selectedFont, isDarkThe
     ctx.restore();
     
     const counts = points.map(p => p.count);
-    const minCount = Math.min(...counts);
-    const maxCount = Math.max(...counts);
+    const minCount = counts.length > 0 ? Math.min(...counts) : 1;
+    const maxCount = counts.length > 0 ? Math.max(...counts) : 1;
     
     const isDensityBased = (clusterMethod === 'dbscan' || clusterMethod === 'hdbscan');
     const validClusters = points.map(p => p.cluster).filter(c => c >= 0);
@@ -8292,7 +8342,9 @@ async function executeImageDownload(sizeKey = 'medium') {
             exportCanvas.height = targetSize.h;
 
             const selectedFont = fontSelect.value;
-            drawPCAOnCanvas(exportCanvas, pcaPoints, selectedTheme, selectedFont, isDarkTheme);
+            // Clone point objects so export-scale coordinates do not overwrite screen _labelBox collision caches
+            const clonedPcaPoints = pcaPoints.map(p => ({ ...p }));
+            drawPCAOnCanvas(exportCanvas, clonedPcaPoints, selectedTheme, selectedFont, isDarkTheme);
 
             const image = exportCanvas.toDataURL("image/png");
             await saveImageFile(image, 'pca_scatter.png');
@@ -8302,7 +8354,9 @@ async function executeImageDownload(sizeKey = 'medium') {
             exportCanvas.height = targetSize.h;
 
             const selectedFont = fontSelect.value;
-            drawUMAPOnCanvas(exportCanvas, umapPoints, selectedTheme, selectedFont, isDarkTheme);
+            // Clone point objects so export-scale coordinates do not overwrite screen _labelBox collision caches
+            const clonedUmapPoints = umapPoints.map(p => ({ ...p }));
+            drawUMAPOnCanvas(exportCanvas, clonedUmapPoints, selectedTheme, selectedFont, isDarkTheme);
 
             const image = exportCanvas.toDataURL("image/png");
             await saveImageFile(image, 'umap_scatter.png');
